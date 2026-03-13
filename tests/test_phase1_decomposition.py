@@ -33,7 +33,7 @@ def test_sector_projectors_and_schur_transform_unitary():
     assert np.allclose(total, np.eye(dim), atol=1e-8)
 
 
-def test_copy_projectors_resolve_sector_and_commute_generators():
+def test_multiplicity_projectors_resolve_sector_and_commute_generators():
     sys = PhotonicSystem(m_ext=2, n_particles=3, rng=np.random.default_rng(2))
     decomp = sys.decomposition
 
@@ -45,7 +45,7 @@ def test_copy_projectors_resolve_sector_and_commute_generators():
 
     assert target_lam is not None
 
-    fam = decomp.copy_projectors(target_lam)
+    fam = decomp.multiplicity_projectors(target_lam)
     d_mult = decomp.dim_mult(target_lam)
     assert len(fam) == d_mult
 
@@ -90,9 +90,9 @@ def test_state_conversion_blocks_and_commutant_sampling():
             break
     assert lam_mult is not None
 
-    copy_state = rho.copy_block(lam_mult, 0)
-    Qa = sys.copy_projector(lam_mult, 0)
-    assert np.allclose(copy_state.matrix, _safe_matmul(Qa, rho.matrix, Qa), atol=1e-8)
+    multiplicity_state = rho.multiplicity_block(lam_mult, 0)
+    Qa = sys.multiplicity_projector(lam_mult, 0)
+    assert np.allclose(multiplicity_state.matrix, _safe_matmul(Qa, rho.matrix, Qa), atol=1e-8)
 
     rho_comm = sys.state.random_commutant_state()
     for perm in permutations(range(sys.spec.n_particles)):

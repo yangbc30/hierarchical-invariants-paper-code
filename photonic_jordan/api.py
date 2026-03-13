@@ -25,7 +25,7 @@ from .decomposition import SchurWeylDecomposition
 ArrayLike = Union[np.ndarray, Sequence[Sequence[complex]]]
 GramInput = Union[str, float, complex, np.ndarray, Sequence[Sequence[complex]]]
 Partition = Tuple[int, ...]
-CopyLabel = Tuple[Partition, int]
+MultiplicityLabel = Tuple[Partition, int]
 
 
 @dataclass
@@ -56,7 +56,7 @@ class PhotonicSystem:
     """High-level user-facing entry point.
 
     This keeps the v2 mental model while introducing the v3 Phase-1 internal
-    decomposition object for Schur/sector/copy representations.
+    decomposition object for Schur/sector/multiplicity representations.
     """
 
     def __init__(
@@ -120,35 +120,54 @@ class PhotonicSystem:
             self._built_order = max_order
 
     @staticmethod
-    def _validate_scope_inputs(sector: Optional[Partition], copy: Optional[CopyLabel]) -> None:
-        if sector is not None and copy is not None:
-            raise ValueError("Provide at most one scope: global, sector=..., or copy=....")
+    def _resolve_multiplicity_arg(
+        multiplicity: Optional[MultiplicityLabel],
+        copy: Optional[MultiplicityLabel],
+    ) -> Optional[MultiplicityLabel]:
+        if multiplicity is not None and copy is not None:
+            raise ValueError("Provide only one of multiplicity=... or copy=... (legacy alias).")
+        return multiplicity if multiplicity is not None else copy
 
     @staticmethod
-    def _scope_key(sector: Optional[Partition], copy: Optional[CopyLabel]) -> Tuple[Union[str, Partition], ...]:
+    def _validate_scope_inputs(sector: Optional[Partition], multiplicity: Optional[MultiplicityLabel]) -> None:
+        if sector is not None and multiplicity is not None:
+            raise ValueError("Provide at most one scope: global, sector=..., or multiplicity=....")
+
+    @staticmethod
+    def _scope_key(
+        sector: Optional[Partition],
+        multiplicity: Optional[MultiplicityLabel],
+    ) -> Tuple[Union[str, Partition], ...]:
         if sector is not None:
             return ("sector", tuple(sector))
-        if copy is not None:
-            lam, a = copy
-            return ("copy", tuple(lam), int(a))
+        if multiplicity is not None:
+            lam, a = multiplicity
+            return ("multiplicity", tuple(lam), int(a))
         return ("global",)
 
-    def scope_projector(self, sector: Optional[Partition] = None, copy: Optional[CopyLabel] = None) -> Optional[np.ndarray]:
-        self._validate_scope_inputs(sector=sector, copy=copy)
+    def scope_projector(
+        self,
+        sector: Optional[Partition] = None,
+        multiplicity: Optional[MultiplicityLabel] = None,
+        copy: Optional[MultiplicityLabel] = None,
+    ) -> Optional[np.ndarray]:
+        multiplicity = self._resolve_multiplicity_arg(multiplicity, copy)
+        self._validate_scope_inputs(sector=sector, multiplicity=multiplicity)
         if sector is not None:
             return self.sector_projector(sector)
-        if copy is not None:
-            lam, a = copy
-            return self.copy_projector(lam, a)
+        if multiplicity is not None:
+            lam, a = multiplicity
+            return self.multiplicity_projector(lam, a)
         return None
 
     def project_density_to_scope(
         self,
         rho: np.ndarray,
         sector: Optional[Partition] = None,
-        copy: Optional[CopyLabel] = None,
+        multiplicity: Optional[MultiplicityLabel] = None,
+        copy: Optional[MultiplicityLabel] = None,
     ) -> np.ndarray:
-        Q = self.scope_projector(sector=sector, copy=copy)
+        Q = self.scope_projector(sector=sector, multiplicity=multiplicity, copy=copy)
         if Q is None:
             return rho
         return safe_matmul(Q, rho, Q)
@@ -157,16 +176,18 @@ class PhotonicSystem:
         self,
         max_order: int,
         sector: Optional[Partition] = None,
-        copy: Optional[CopyLabel] = None,
+        multiplicity: Optional[MultiplicityLabel] = None,
+        copy: Optional[MultiplicityLabel] = None,
     ) -> JordanFiltration:
-        self._validate_scope_inputs(sector=sector, copy=copy)
-        key = self._scope_key(sector=sector, copy=copy)
+        multiplicity = self._resolve_multiplicity_arg(multiplicity, copy)
+        self._validate_scope_inputs(sector=sector, multiplicity=multiplicity)
+        key = self._scope_key(sector=sector, multiplicity=multiplicity)
         if key == ("global",):
             self.ensure_filtration(max_order=max_order)
             return self._filtration
 
         if key not in self._scoped_filtrations:
-            Q = self.scope_projector(sector=sector, copy=copy)
+            Q = self.scope_projector(sector=sector, multiplicity=multiplicity)
             if Q is None:
                 raise RuntimeError("Scoped filtration requires a non-global scope projector.")
             generators = [safe_matmul(Q, G, Q) for G in self.space.generators.values()]
@@ -193,10 +214,14 @@ class PhotonicSystem:
             raise NotImplementedError("Sector projectors are only implemented for n=2,3 in this demo.")
         return self.decomposition.sector_projector(lam)
 
-    def copy_projector(self, lam: Partition, a: int) -> np.ndarray:
+    def multiplicity_projector(self, lam: Partition, a: int) -> np.ndarray:
         if self._projectors is None:
-            raise NotImplementedError("Copy projectors are only implemented for n=2,3 in this demo.")
-        return self.decomposition.copy_projector(lam, a)
+            raise NotImplementedError("Multiplicity projectors are only implemented for n=2,3 in this demo.")
+        return self.decomposition.multiplicity_projector(lam, a)
+
+    # Backward-compatible alias.
+    def copy_projector(self, lam: Partition, a: int) -> np.ndarray:
+        return self.multiplicity_projector(lam, a)
 
     def density_state(self, rho: ArrayLike, rep: str = "tensor", label: Optional[str] = None) -> "PhotonicState":
         arr = np.asarray(rho, dtype=complex)
@@ -292,34 +317,73 @@ class StateInvariantView:
     def __init__(self, state: "PhotonicState"):
         self.state = state
 
-    def _density_in_scope(self, sector: Optional[Partition], copy: Optional[CopyLabel]) -> np.ndarray:
+    def _density_in_scope(
+        self,
+        sector: Optional[Partition],
+        multiplicity: Optional[MultiplicityLabel] = None,
+        copy: Optional[MultiplicityLabel] = None,
+    ) -> np.ndarray:
         rho_t = self.state._tensor_matrix()
-        return self.state.system.project_density_to_scope(rho_t, sector=sector, copy=copy)
+        return self.state.system.project_density_to_scope(
+            rho_t,
+            sector=sector,
+            multiplicity=multiplicity,
+            copy=copy,
+        )
 
-    def I_exact(self, order: int, sector: Optional[Partition] = None, copy: Optional[CopyLabel] = None) -> float:
-        filtration = self.state.system.ensure_scope_filtration(max_order=order, sector=sector, copy=copy)
-        return filtration.layer_weight(self._density_in_scope(sector=sector, copy=copy), order)
+    def I_exact(
+        self,
+        order: int,
+        sector: Optional[Partition] = None,
+        multiplicity: Optional[MultiplicityLabel] = None,
+        copy: Optional[MultiplicityLabel] = None,
+    ) -> float:
+        filtration = self.state.system.ensure_scope_filtration(
+            max_order=order,
+            sector=sector,
+            multiplicity=multiplicity,
+            copy=copy,
+        )
+        return filtration.layer_weight(
+            self._density_in_scope(sector=sector, multiplicity=multiplicity, copy=copy),
+            order,
+        )
 
     def I_cumulative(
         self,
         order: int,
         sector: Optional[Partition] = None,
-        copy: Optional[CopyLabel] = None,
+        multiplicity: Optional[MultiplicityLabel] = None,
+        copy: Optional[MultiplicityLabel] = None,
     ) -> float:
-        filtration = self.state.system.ensure_scope_filtration(max_order=order, sector=sector, copy=copy)
-        return filtration.cumulative_weight(self._density_in_scope(sector=sector, copy=copy), order)
+        filtration = self.state.system.ensure_scope_filtration(
+            max_order=order,
+            sector=sector,
+            multiplicity=multiplicity,
+            copy=copy,
+        )
+        return filtration.cumulative_weight(
+            self._density_in_scope(sector=sector, multiplicity=multiplicity, copy=copy),
+            order,
+        )
 
     def report(
         self,
         max_order: Optional[int] = None,
         include_sectors: bool = True,
         sector: Optional[Partition] = None,
-        copy: Optional[CopyLabel] = None,
+        multiplicity: Optional[MultiplicityLabel] = None,
+        copy: Optional[MultiplicityLabel] = None,
     ) -> InvariantReport:
         if max_order is None:
             max_order = self.state.system.spec.n_particles
-        filtration = self.state.system.ensure_scope_filtration(max_order=max_order, sector=sector, copy=copy)
-        rho_t = self._density_in_scope(sector=sector, copy=copy)
+        filtration = self.state.system.ensure_scope_filtration(
+            max_order=max_order,
+            sector=sector,
+            multiplicity=multiplicity,
+            copy=copy,
+        )
+        rho_t = self._density_in_scope(sector=sector, multiplicity=multiplicity, copy=copy)
         cumulative = {
             j: filtration.cumulative_weight(rho_t, j)
             for j in range(max_order + 1)
@@ -328,7 +392,7 @@ class StateInvariantView:
             j: filtration.layer_weight(rho_t, j)
             for j in range(max_order + 1)
         }
-        sectors = self.state.sector_weights() if include_sectors and sector is None and copy is None else None
+        sectors = self.state.sector_weights() if include_sectors and sector is None and multiplicity is None and copy is None else None
         return InvariantReport(cumulative=cumulative, exact=exact, sector_weights=sectors)
 
 
@@ -411,10 +475,21 @@ class PhotonicState:
         order: int,
         kind: str = "exact",
         sector: Optional[Partition] = None,
-        copy: Optional[CopyLabel] = None,
+        multiplicity: Optional[MultiplicityLabel] = None,
+        copy: Optional[MultiplicityLabel] = None,
     ) -> "PhotonicState":
-        filtration = self.system.ensure_scope_filtration(max_order=order, sector=sector, copy=copy)
-        rho_t = self.system.project_density_to_scope(self._tensor_matrix(), sector=sector, copy=copy)
+        filtration = self.system.ensure_scope_filtration(
+            max_order=order,
+            sector=sector,
+            multiplicity=multiplicity,
+            copy=copy,
+        )
+        rho_t = self.system.project_density_to_scope(
+            self._tensor_matrix(),
+            sector=sector,
+            multiplicity=multiplicity,
+            copy=copy,
+        )
 
         kind = kind.lower()
         if kind in {"exact", "layer", "delta"}:
@@ -428,8 +503,9 @@ class PhotonicState:
 
         if sector is not None:
             rep = f"{rep}_sector_{tuple(sector)}"
-        elif copy is not None:
-            rep = f"{rep}_copy_{tuple(copy[0])}_{copy[1]}"
+        elif multiplicity is not None or copy is not None:
+            active = multiplicity if multiplicity is not None else copy
+            rep = f"{rep}_multiplicity_{tuple(active[0])}_{active[1]}"
 
         label = None if self.label is None else f"{self.label} | {rep}"
         cache = dict(self._cache)
@@ -442,12 +518,22 @@ class PhotonicState:
         label = None if self.label is None else f"{self.label} | sector {lam}"
         return PhotonicState(system=self.system, data=data, rep=f"sector_{lam}", label=label, _cache={"tensor": data})
 
-    def project_copy(self, lam: Partition, a: int) -> "PhotonicState":
-        """Project to copy-local block Q_{lam,a}; basis-dependent by convention."""
-        Qa = self.system.copy_projector(lam, a)
+    def project_multiplicity(self, lam: Partition, a: int) -> "PhotonicState":
+        """Project to multiplicity-local block Q_{lam,a}; basis-dependent by convention."""
+        Qa = self.system.multiplicity_projector(lam, a)
         data = safe_matmul(Qa, self._tensor_matrix(), Qa)
-        label = None if self.label is None else f"{self.label} | copy ({lam}, {a})"
-        return PhotonicState(system=self.system, data=data, rep=f"copy_{lam}_{a}", label=label, _cache={"tensor": data})
+        label = None if self.label is None else f"{self.label} | multiplicity ({lam}, {a})"
+        return PhotonicState(
+            system=self.system,
+            data=data,
+            rep=f"multiplicity_{lam}_{a}",
+            label=label,
+            _cache={"tensor": data},
+        )
+
+    # Backward-compatible alias.
+    def project_copy(self, lam: Partition, a: int) -> "PhotonicState":
+        return self.project_multiplicity(lam, a)
 
     def blocks(self) -> Dict[Partition, "PhotonicState"]:
         return {lam: self.project_sector(lam) for lam in self.system.available_partitions()}
@@ -455,8 +541,12 @@ class PhotonicState:
     def block(self, lam: Partition) -> "PhotonicState":
         return self.project_sector(lam)
 
+    def multiplicity_block(self, lam: Partition, a: int) -> "PhotonicState":
+        return self.project_multiplicity(lam, a)
+
+    # Backward-compatible alias.
     def copy_block(self, lam: Partition, a: int) -> "PhotonicState":
-        return self.project_copy(lam, a)
+        return self.multiplicity_block(lam, a)
 
     def sector_weights(self) -> Optional[Dict[Partition, float]]:
         if self.system.projectors is None:
@@ -473,12 +563,14 @@ class PhotonicState:
         max_order: Optional[int] = None,
         include_sectors: bool = True,
         sector: Optional[Partition] = None,
-        copy: Optional[CopyLabel] = None,
+        multiplicity: Optional[MultiplicityLabel] = None,
+        copy: Optional[MultiplicityLabel] = None,
     ) -> InvariantReport:
         return self.invariant.report(
             max_order=max_order,
             include_sectors=include_sectors,
             sector=sector,
+            multiplicity=multiplicity,
             copy=copy,
         )
 

@@ -13,11 +13,11 @@ Partition = Tuple[int, ...]
 
 
 class SchurWeylDecomposition:
-    """Lazy Schur/sector/copy decomposition cache for the current demo scope.
+    """Lazy Schur/sector/multiplicity decomposition cache for the current demo scope.
 
     Notes:
     - Sector objects based on Q_lambda are canonical (basis-independent).
-    - Copy objects based on Q_{lambda,a} are basis-dependent because they require
+    - Multiplicity objects based on Q_{lambda,a} are basis-dependent because they require
       a chosen multiplicity basis.
     """
 
@@ -27,7 +27,7 @@ class SchurWeylDecomposition:
         self._partitions: List[Partition] = list(projectors.available_partitions())
         self._sector_projectors: Dict[Partition, np.ndarray] = {}
         self._sector_bases: Dict[Partition, np.ndarray] = {}
-        self._copy_projectors: Dict[Partition, Tuple[np.ndarray, ...]] = {}
+        self._multiplicity_projectors: Dict[Partition, Tuple[np.ndarray, ...]] = {}
         self._commutant_bases: Dict[Partition, Tuple[np.ndarray, ...]] = {}
         self._block_slices: Dict[Partition, slice] = {}
         self._W: Optional[np.ndarray] = None
@@ -169,15 +169,15 @@ class SchurWeylDecomposition:
                 worst = max(worst, float(la.norm(safe_matmul(P, G) - safe_matmul(G, P))))
         return worst
 
-    def _build_copy_projectors(self, lam: Partition) -> Tuple[np.ndarray, ...]:
-        if lam in self._copy_projectors:
-            return self._copy_projectors[lam]
+    def _build_multiplicity_projectors(self, lam: Partition) -> Tuple[np.ndarray, ...]:
+        if lam in self._multiplicity_projectors:
+            return self._multiplicity_projectors[lam]
 
         Q_lam = self.sector_projector(lam)
         d_mult = self.dim_mult(lam)
         if d_mult == 1:
-            self._copy_projectors[lam] = (Q_lam,)
-            return self._copy_projectors[lam]
+            self._multiplicity_projectors[lam] = (Q_lam,)
+            return self._multiplicity_projectors[lam]
 
         basis = self._sector_bases[lam]
         rank = basis.shape[1]
@@ -228,8 +228,8 @@ class SchurWeylDecomposition:
 
         if successful is None:
             raise RuntimeError(
-                "Failed to resolve copy projectors from commutant structure. "
-                "This demo implementation currently supports robust copy resolution for small n."
+                "Failed to resolve multiplicity projectors from commutant structure. "
+                "This demo implementation currently supports robust multiplicity resolution for small n."
             )
 
         projectors_full: List[np.ndarray] = []
@@ -241,18 +241,26 @@ class SchurWeylDecomposition:
             P_clean = safe_matmul(vecs[:, keep], vecs[:, keep].conj().T) if np.any(keep) else np.zeros_like(P)
             projectors_full.append(P_clean)
 
-        self._copy_projectors[lam] = tuple(projectors_full)
-        return self._copy_projectors[lam]
+        self._multiplicity_projectors[lam] = tuple(projectors_full)
+        return self._multiplicity_projectors[lam]
 
-    def copy_projectors(self, lam: Partition) -> Tuple[np.ndarray, ...]:
+    def multiplicity_projectors(self, lam: Partition) -> Tuple[np.ndarray, ...]:
         self._build_sector_metadata()
-        return self._build_copy_projectors(lam)
+        return self._build_multiplicity_projectors(lam)
+
+    def multiplicity_projector(self, lam: Partition, a: int) -> np.ndarray:
+        fam = self.multiplicity_projectors(lam)
+        if a < 0 or a >= len(fam):
+            raise IndexError(f"multiplicity index a={a} is out of range for partition {lam}.")
+        return fam[a]
+
+    # Backward-compatible aliases.
+    def copy_projectors(self, lam: Partition) -> Tuple[np.ndarray, ...]:
+        return self.multiplicity_projectors(lam)
 
     def copy_projector(self, lam: Partition, a: int) -> np.ndarray:
-        fam = self.copy_projectors(lam)
-        if a < 0 or a >= len(fam):
-            raise IndexError(f"copy index a={a} is out of range for partition {lam}.")
-        return fam[a]
+        return self.multiplicity_projector(lam, a)
+
     @staticmethod
     def _stable_seed(space_m: int, space_n: int, lam: Partition) -> int:
         payload = f"{space_m}|{space_n}|{','.join(map(str, lam))}".encode("ascii")
