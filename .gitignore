@@ -1,0 +1,22 @@
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+build/
+dist/
+
+# Virtual envs
+.venv/
+venv/
+
+# Test and tool caches
+.pytest_cache/
+.mypy_cache/
+
+# IDE/editor
+.vscode/
+.DS_Store
+
+# Notebooks
+*.ipynb
