@@ -20,3 +20,5 @@ venv/
 
 # Notebooks
 *.ipynb
+!notebooks/
+!notebooks/*.ipynb
