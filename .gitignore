@@ -13,6 +13,7 @@ venv/
 # Test and tool caches
 .pytest_cache/
 .mypy_cache/
+site/
 
 # IDE/editor
 .vscode/

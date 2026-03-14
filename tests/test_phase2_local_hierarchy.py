@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 import scipy.linalg as la
 
-from photonic_jordan.api import PhotonicSystem
-from photonic_jordan.core import safe_matmul
+from photonic_jordan import PhotonicSystem
+from photonic_jordan import safe_matmul
 
 
 def test_scope_conflict_raises_error():

@@ -3,7 +3,7 @@ from itertools import permutations
 import numpy as np
 import scipy.linalg as la
 
-from photonic_jordan.api import PhotonicSystem
+from photonic_jordan import PhotonicSystem
 
 
 def _safe_matmul(*ops: np.ndarray) -> np.ndarray:
@@ -67,15 +67,14 @@ def test_multiplicity_projectors_resolve_sector_and_commute_generators():
             assert la.norm(_safe_matmul(fam[i], fam[j])) < 1e-6
 
 
-def test_state_conversion_blocks_and_commutant_sampling():
+def test_state_representation_access_blocks_and_commutant_sampling():
     sys = PhotonicSystem(m_ext=2, n_particles=3, rng=np.random.default_rng(3))
 
     rho = sys.state.from_modes_and_gram([0, 1, 0], gram="indistinguishable")
-    rho_s = rho.to("schur")
-    rho_t = rho_s.to("tensor")
-    assert rho_s.rep == "schur"
-    assert rho_t.rep == "tensor"
-    assert np.allclose(rho_t.matrix, rho.matrix, atol=1e-8)
+    rho_t = rho.density_matrix(rep="tensor")
+    rho_s = rho.density_matrix(rep="schur")
+    rho_back = sys.decomposition.to_tensor_operator(rho_s)
+    assert np.allclose(rho_back, rho_t, atol=1e-8)
 
     blocks = rho.blocks()
     assert set(blocks.keys()) == set(sys.available_partitions())

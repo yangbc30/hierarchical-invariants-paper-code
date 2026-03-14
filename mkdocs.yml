@@ -1,0 +1,12 @@
+site_name: Photonic Jordan Framework
+repo_url: https://github.com/yangbc30/hierarchical-invariants-paper-code
+site_url: https://yangbc30.github.io/hierarchical-invariants-paper-code/
+nav:
+  - Home: index.md
+  - Quick Start: quickstart.md
+  - API Guide: api.md
+  - Theory Notes: theory.md
+  - Reproducibility: reproducibility.md
+  - References: references.md
+theme:
+  name: mkdocs

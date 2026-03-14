@@ -1,3 +1,5 @@
+"""Schur-Weyl decomposition helpers for small-``n`` demo scope."""
+
 from __future__ import annotations
 
 import hashlib
@@ -6,19 +8,28 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import scipy.linalg as la
 
-from .core import LabeledTensorSpace, SymmetricGroupProjectors, safe_matmul
-
+from ..math import safe_matmul
+from ..spaces import LabeledTensorSpace, SymmetricGroupProjectors
 
 Partition = Tuple[int, ...]
 
 
 class SchurWeylDecomposition:
-    """Lazy Schur/sector/multiplicity decomposition cache for the current demo scope.
+    """Lazy Schur/sector/multiplicity decomposition cache.
 
-    Notes:
-    - Sector objects based on Q_lambda are canonical (basis-independent).
-    - Multiplicity objects based on Q_{lambda,a} are basis-dependent because they require
-      a chosen multiplicity basis.
+    Conceptual split
+    ----------------
+    - sector projectors ``Q_λ`` are canonical (basis-independent),
+    - multiplicity projectors ``Q_{λ,a}`` require choosing a basis in the
+      multiplicity space and are therefore convention-dependent.
+
+    This implementation chooses multiplicity labels deterministically by a
+    stable-seeded commutant diagonalization.
+
+    References
+    ----------
+    - W. Fulton and J. Harris, *Representation Theory: A First Course*
+      (Schur-Weyl duality and multiplicity spaces).
     """
 
     def __init__(self, space: LabeledTensorSpace, projectors: SymmetricGroupProjectors):
@@ -33,6 +44,7 @@ class SchurWeylDecomposition:
         self._W: Optional[np.ndarray] = None
 
     def partitions(self) -> List[Partition]:
+        """Return available Schur partition labels."""
         return list(self._partitions)
 
     def _build_sector_metadata(self) -> None:
@@ -74,32 +86,38 @@ class SchurWeylDecomposition:
         self._W = W
 
     def schur_transform(self) -> np.ndarray:
+        """Return unitary basis change matrix from tensor to Schur basis."""
         self._build_sector_metadata()
         return np.asarray(self._W)
 
     def block_slice(self, lam: Partition) -> slice:
+        """Return slice locating sector block of ``lam`` in Schur basis."""
         self._build_sector_metadata()
         if lam not in self._block_slices:
             raise KeyError(f"Unknown partition {lam}.")
         return self._block_slices[lam]
 
     def sector_projector(self, lam: Partition) -> np.ndarray:
+        """Return sector projector ``Q_lambda`` in tensor basis."""
         self._build_sector_metadata()
         if lam not in self._sector_projectors:
             raise KeyError(f"Unknown partition {lam}.")
         return self._sector_projectors[lam]
 
     def dim_total(self, lam: Partition) -> int:
+        """Return total rank of sector ``lambda``."""
         self._build_sector_metadata()
         return int(self._sector_bases[lam].shape[1])
 
     def dim_mult(self, lam: Partition) -> int:
+        """Return multiplicity dimension ``d_lambda`` for sector ``lambda``."""
         table = self._projectors.CHARACTER_TABLE[self.space.n]
         if lam not in table:
             raise KeyError(f"Unknown partition {lam}.")
         return int(table[lam]["dim"])
 
     def dim_U(self, lam: Partition) -> int:
+        """Return irrep carrier dimension ``dim(U_lambda)``."""
         total = self.dim_total(lam)
         mult = self.dim_mult(lam)
         if mult <= 0 or total % mult != 0:
@@ -107,14 +125,17 @@ class SchurWeylDecomposition:
         return total // mult
 
     def to_schur_operator(self, op_tensor: np.ndarray) -> np.ndarray:
+        """Transform operator from tensor basis to Schur basis."""
         W = self.schur_transform()
         return safe_matmul(W.conj().T, op_tensor, W)
 
     def to_tensor_operator(self, op_schur: np.ndarray) -> np.ndarray:
+        """Transform operator from Schur basis back to tensor basis."""
         W = self.schur_transform()
         return safe_matmul(W, op_schur, W.conj().T)
 
     def sector_blocks(self, op: np.ndarray, rep: str = "tensor") -> Dict[Partition, np.ndarray]:
+        """Split operator into Schur sector blocks."""
         rep_key = rep.lower()
         op_s = self.to_schur_operator(op) if rep_key == "tensor" else np.asarray(op, dtype=complex)
         blocks: Dict[Partition, np.ndarray] = {}
@@ -245,10 +266,12 @@ class SchurWeylDecomposition:
         return self._multiplicity_projectors[lam]
 
     def multiplicity_projectors(self, lam: Partition) -> Tuple[np.ndarray, ...]:
+        """Return full family ``(Q_{lambda,0}, ..., Q_{lambda,d_lambda-1})``."""
         self._build_sector_metadata()
         return self._build_multiplicity_projectors(lam)
 
     def multiplicity_projector(self, lam: Partition, a: int) -> np.ndarray:
+        """Return multiplicity-local projector ``Q_{lambda,a}``."""
         fam = self.multiplicity_projectors(lam)
         if a < 0 or a >= len(fam):
             raise IndexError(f"multiplicity index a={a} is out of range for partition {lam}.")
@@ -256,9 +279,11 @@ class SchurWeylDecomposition:
 
     # Backward-compatible aliases.
     def copy_projectors(self, lam: Partition) -> Tuple[np.ndarray, ...]:
+        """Backward-compatible alias of :meth:`multiplicity_projectors`."""
         return self.multiplicity_projectors(lam)
 
     def copy_projector(self, lam: Partition, a: int) -> np.ndarray:
+        """Backward-compatible alias of :meth:`multiplicity_projector`."""
         return self.multiplicity_projector(lam, a)
 
     @staticmethod

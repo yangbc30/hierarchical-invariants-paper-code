@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use this code in academic work, please cite it using this metadata."
+title: "Photonic Jordan Framework: Hierarchical Invariants Prototype"
+type: software
+version: 0.1.0
+date-released: 2026-03-14
+authors:
+  - family-names: "Yang"
+    given-names: "BC"
+    affiliation: "Nanjing University"
+repository-code: "https://github.com/yangbc30/hierarchical-invariants-paper-code"
+url: "https://github.com/yangbc30/hierarchical-invariants-paper-code"
+abstract: >-
+  Numerical framework for Schur-sector and multiplicity-local Jordan hierarchy
+  invariants in multi-photon passive linear-optics models.
+keywords:
+  - photonic quantum information
+  - Jordan hierarchy
+  - Schur-Weyl decomposition
+  - partial distinguishability
+  - linear optics
