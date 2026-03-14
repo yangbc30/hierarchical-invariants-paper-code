@@ -42,4 +42,3 @@ print(rho_tensor.shape, rho_schur.shape)
 ## Online Notebooks
 
 - `notebooks/demo_colab.ipynb`
-- `notebooks/demo_codespaces.ipynb`

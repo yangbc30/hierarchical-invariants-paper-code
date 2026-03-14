@@ -1,7 +1,6 @@
 # Photonic Jordan Framework (Research Prototype)
 
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yangbc30/hierarchical-invariants-paper-code/blob/main/notebooks/demo_colab.ipynb)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/yangbc30/hierarchical-invariants-paper-code)
 
 Numerical framework for checking hierarchical Jordan invariants of multiphoton states under passive linear optics, with global/sector/multiplicity scopes.
 
@@ -115,7 +114,6 @@ GitHub Pages will deploy docs automatically from the workflow in `.github/workfl
 ## Online Demo
 
 - `notebooks/demo_colab.ipynb`
-- `notebooks/demo_codespaces.ipynb`
 
 ## Citation
 
