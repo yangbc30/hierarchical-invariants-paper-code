@@ -10,6 +10,7 @@ from .models import (
     Partition,
     PhotonicState,
     StateInvariantView,
+    StateMeasurementView,
     gram_description,
     resolve_gram_input,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "StateBuilder",
     "StateFactory",
     "StateInvariantView",
+    "StateMeasurementView",
     "UnitaryFactory",
     "gram_description",
     "resolve_gram_input",

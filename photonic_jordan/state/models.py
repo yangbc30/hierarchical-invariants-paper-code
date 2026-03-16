@@ -10,6 +10,7 @@ import numpy as np
 from ..math import normalize_density, safe_matmul
 
 if TYPE_CHECKING:
+    from ..measurement.observable import SingleParticleObservable
     from ..system.photonic_system import PhotonicSystem
 
 ArrayLike = Union[np.ndarray, Sequence[Sequence[complex]]]
@@ -166,6 +167,87 @@ class StateInvariantView:
         return InvariantReport(cumulative=cumulative, exact=exact, sector_weights=sectors)
 
 
+class StateMeasurementView:
+    """Bound measurement API for a specific :class:`PhotonicState`."""
+
+    def __init__(self, state: "PhotonicState"):
+        self.state = state
+
+    def expectation(
+        self,
+        observable: "SingleParticleObservable",
+        sector: Optional[Partition] = None,
+        multiplicity: Optional[MultiplicityLabel] = None,
+        copy: Optional[MultiplicityLabel] = None,
+        conditional: bool = False,
+    ) -> float:
+        """Return expectation value of an observable for this state."""
+        return observable.expectation(
+            self.state,
+            sector=sector,
+            multiplicity=multiplicity,
+            copy=copy,
+            conditional=conditional,
+        )
+
+    def variance(
+        self,
+        observable: "SingleParticleObservable",
+        sector: Optional[Partition] = None,
+        multiplicity: Optional[MultiplicityLabel] = None,
+        copy: Optional[MultiplicityLabel] = None,
+        conditional: bool = False,
+    ) -> float:
+        """Return variance of an observable for this state."""
+        return observable.variance(
+            self.state,
+            sector=sector,
+            multiplicity=multiplicity,
+            copy=copy,
+            conditional=conditional,
+        )
+
+    def distribution(
+        self,
+        observable: "SingleParticleObservable",
+        sector: Optional[Partition] = None,
+        multiplicity: Optional[MultiplicityLabel] = None,
+        copy: Optional[MultiplicityLabel] = None,
+        conditional: bool = False,
+        tol: float = 1e-10,
+    ):
+        """Return grouped spectral distribution for this state."""
+        return observable.distribution(
+            self.state,
+            sector=sector,
+            multiplicity=multiplicity,
+            copy=copy,
+            conditional=conditional,
+            tol=tol,
+        )
+
+    def sample(
+        self,
+        observable: "SingleParticleObservable",
+        shots: int = 1,
+        rng: Optional[np.random.Generator] = None,
+        sector: Optional[Partition] = None,
+        multiplicity: Optional[MultiplicityLabel] = None,
+        copy: Optional[MultiplicityLabel] = None,
+        conditional: bool = False,
+    ):
+        """Sample measurement outcomes for this state."""
+        return observable.sample(
+            self.state,
+            shots=shots,
+            rng=rng,
+            sector=sector,
+            multiplicity=multiplicity,
+            copy=copy,
+            conditional=conditional,
+        )
+
+
 class PhotonicState:
     """State object independent of matrix representation choice.
 
@@ -184,6 +266,8 @@ class PhotonicState:
     -----
     The state itself is representation-independent. Use :meth:`density_matrix`
     to obtain matrices in ``tensor`` or ``schur`` representation.
+    Invariant and measurement helpers are exposed as ``state.invariant`` and
+    ``state.measure``.
     """
 
     def __init__(
@@ -196,6 +280,7 @@ class PhotonicState:
         self.system = system
         self.label = label
         self.invariant = StateInvariantView(self)
+        self.measure = StateMeasurementView(self)
 
         tensor = np.asarray(data, dtype=complex)
         if _cache is None:

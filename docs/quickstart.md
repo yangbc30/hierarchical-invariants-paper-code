@@ -37,7 +37,30 @@ print(rho.invariant.I_exact(1, multiplicity=(lam, 0)))
 rho_tensor = rho.density_matrix(rep=\"tensor\")
 rho_schur = rho.density_matrix(rep=\"schur\")
 print(rho_tensor.shape, rho_schur.shape)
+
+# Observable measurement
+obs = sys.observable.sigma_z(modes=(0, 1))
+print(rho.measure.expectation(obs))
+print(rho.measure.variance(obs))
+print(rho.measure.distribution(obs))
 ```
+
+## Measurement Scope Behavior
+
+- `conditional=False` (default): scoped statistics are unnormalized scope contributions.
+- `conditional=True`: scoped density is renormalized inside the selected scope.
+
+For distributions:
+
+- global query sums to `1`
+- scoped query with `conditional=False` sums to `Tr(Q rho)`
+- scoped query with `conditional=True` sums to `1`
+
+## Not Included Yet
+
+- generic POVM classes
+- detector noise / dark counts
+- post-measurement state update maps
 
 ## Online Notebooks
 

@@ -9,6 +9,7 @@ import numpy as np
 from ..dynamics import PassiveLODynamics
 from ..hierarchy import InvariantEngine, JordanFiltration
 from ..math import normalize_density, safe_matmul
+from ..measurement import ObservableFactory
 from ..schur import SchurWeylDecomposition
 from ..spaces import LabeledTensorSpace, SymmetricGroupProjectors
 from ..specs import ModelSpec
@@ -30,6 +31,7 @@ class PhotonicSystem:
     - labeled tensor space and one-body generators,
     - Schur/multiplicity projectors,
     - global and scoped Jordan filtrations.
+    - observable constructors for lifted one-body measurements.
 
     Scope semantics
     ---------------
@@ -67,6 +69,7 @@ class PhotonicSystem:
 
         self.state = StateBuilder(self)
         self.unitary = UnitaryFactory(self)
+        self.observable = ObservableFactory(self)
 
     @property
     def hilbert_dim(self) -> int:

@@ -7,6 +7,7 @@ The implementation supports:
 - global Jordan hierarchy invariants,
 - Schur-sector-local hierarchy invariants,
 - multiplicity-local hierarchy invariants (basis-convention dependent but deterministic in this code).
+- lifted one-body observable measurement (expectation, variance, distribution, sampling).
 
 ## Scope
 

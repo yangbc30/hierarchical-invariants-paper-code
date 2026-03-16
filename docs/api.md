@@ -11,12 +11,14 @@ Core user workflows:
 1. Construct a system (`m_ext`, `n_particles`).
 2. Build states from Gram models or explicit density matrices.
 3. Evaluate invariants globally or on a local scope.
+4. Measure lifted one-body observables.
 
 ## State Layer
 
 - `photonic_jordan.StateBuilder`
 - `photonic_jordan.PhotonicState`
 - `photonic_jordan.StateInvariantView`
+- `photonic_jordan.StateMeasurementView`
 - `photonic_jordan.InvariantReport`
 
 Common methods:
@@ -26,6 +28,8 @@ Common methods:
 - `PhotonicState.project_jordan`
 - `StateInvariantView.I_exact`
 - `StateInvariantView.I_cumulative`
+- `StateMeasurementView.expectation`
+- `StateMeasurementView.distribution`
 - `PhotonicState.analyze`
 
 Representation note:
@@ -57,6 +61,39 @@ Common methods:
 - `JordanFiltration.apply_projector_cumulative`
 - `InvariantEngine.commutator_error_layer`
 - `InvariantEngine.commutator_error_cumulative`
+
+## Measurement Layer
+
+- `photonic_jordan.ObservableFactory`
+- `photonic_jordan.SingleParticleObservable`
+- `photonic_jordan.ObservableDistribution`
+
+Common methods:
+
+- `ObservableFactory.from_matrix`
+- `ObservableFactory.number`
+- `ObservableFactory.sigma_x`
+- `ObservableFactory.sigma_y`
+- `ObservableFactory.sigma_z`
+- `SingleParticleObservable.expectation`
+- `SingleParticleObservable.variance`
+- `SingleParticleObservable.distribution`
+- `SingleParticleObservable.sample`
+
+Scope semantics are shared with invariants:
+
+- global
+- `sector=lambda`
+- `multiplicity=(lambda, a)` (or legacy alias `copy=...`)
+
+Scoped distribution behavior:
+
+- `conditional=False`: probabilities sum to `Tr(Q rho)`
+- `conditional=True`: probabilities sum to `1`
+
+Current non-goal:
+
+- generic POVM support is intentionally not included in this iteration.
 
 ## Documentation Conventions
 

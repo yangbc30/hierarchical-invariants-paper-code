@@ -18,6 +18,8 @@ def test_key_methods_use_structured_sections():
         (pj.StateBuilder.from_modes_and_gram, ["Parameters", "Returns"]),
         (pj.StateInvariantView.I_exact, ["Parameters"]),
         (pj.PhotonicState.project_jordan, ["Parameters"]),
+        (pj.ObservableFactory.from_matrix, ["Parameters"]),
+        (pj.SingleParticleObservable, ["Parameters", "Notes"]),
         (pj.SchurWeylDecomposition, ["References"]),
     ]
 

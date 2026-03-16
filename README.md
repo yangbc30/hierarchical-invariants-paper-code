@@ -9,6 +9,7 @@ Numerical framework for checking hierarchical Jordan invariants of multiphoton s
 - Keep a simple user API centered on `PhotonicSystem`, `PhotonicState`, and `InvariantReport`.
 - Provide reproducible numerical checks for theory statements used in papers.
 - Support Schur-aware decomposition and local Jordan hierarchies.
+- Support one-body observable measurement through `system.observable` and `state.measure`.
 
 ## Core Design Contracts
 
@@ -69,6 +70,12 @@ print(rho_out.analyze(max_order=3))
 # Same physical state in different matrix representations
 rho_tensor = rho_out.density_matrix(rep="tensor")
 rho_schur = rho_out.density_matrix(rep="schur")
+
+# Observable measurement (v1: lifted single-particle Hermitian observables)
+obs = sys.observable.sigma_z(modes=(0, 1))
+print(rho_out.measure.expectation(obs))
+print(rho_out.measure.variance(obs))
+print(rho_out.measure.distribution(obs))
 ```
 
 ## Install
@@ -89,6 +96,7 @@ python3 -m venv .venv
 - `photonic_jordan/math/`: linear algebra helpers.
 - `photonic_jordan/spaces/`: labeled tensor space and symmetric-group projectors.
 - `photonic_jordan/hierarchy/`: Jordan filtration and invariant diagnostics.
+- `photonic_jordan/measurement/`: one-body observable construction and measurement views.
 - `photonic_jordan/state/`: state factory, state object, user-facing builders.
 - `photonic_jordan/system/`: top-level `PhotonicSystem` orchestrator.
 - `photonic_jordan/schur/`: Schur-Weyl decomposition and multiplicity projectors.
