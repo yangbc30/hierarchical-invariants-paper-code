@@ -5,7 +5,7 @@ from .hierarchy import InvariantEngine, JordanFiltration
 from .math import haar_random_unitary, normalize_density, safe_matmul
 from .measurement import ObservableDistribution, ObservableFactory, SingleParticleObservable
 from .schur import SchurWeylDecomposition
-from .spaces import LabeledTensorSpace, SymmetricGroupProjectors
+from .spaces import BosonicFockSpace, LabeledTensorSpace, SymmetricGroupProjectors
 from .specs import ModelSpec
 from .state import (
     InvariantReport,
@@ -24,6 +24,7 @@ __all__ = [
     "InvariantEngine",
     "InvariantReport",
     "JordanFiltration",
+    "BosonicFockSpace",
     "LabeledTensorSpace",
     "ModelSpec",
     "ObservableDistribution",

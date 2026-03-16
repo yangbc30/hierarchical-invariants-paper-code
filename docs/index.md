@@ -1,4 +1,4 @@
-# Photonic Jordan Framework
+# Linear Optics Toolkit
 
 This repository provides a numerical framework to evaluate **hierarchical invariants** of photonic states under passive linear optics.
 
@@ -8,6 +8,7 @@ The implementation supports:
 - Schur-sector-local hierarchy invariants,
 - multiplicity-local hierarchy invariants (basis-convention dependent but deterministic in this code).
 - lifted one-body observable measurement (expectation, variance, distribution, sampling).
+- a bosonic symmetric Fock backend for `gram=1` state construction/performance.
 
 ## Scope
 
@@ -28,5 +29,6 @@ See:
 - [Quick Start](quickstart.md)
 - [API Guide](api.md)
 - [Theory Notes](theory.md)
+- [Performance](performance.md)
 - [Reproducibility](reproducibility.md)
 - [References](references.md)

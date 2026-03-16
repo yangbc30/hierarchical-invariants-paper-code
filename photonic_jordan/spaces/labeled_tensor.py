@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from itertools import product
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
@@ -32,8 +32,22 @@ class LabeledTensorSpace:
         self.index_weights = (self.m ** np.arange(self.n - 1, -1, -1)).astype(int)
         self.state_to_index = {state: idx for idx, state in enumerate(self.basis_states)}
 
-        self.single_ops = self._build_single_particle_ops()
-        self.generators = self._build_generators()
+        self._single_ops_cache: Optional[Dict[Tuple[int, int], np.ndarray]] = None
+        self._generators_cache: Optional[Dict[Tuple[int, int], np.ndarray]] = None
+
+    @property
+    def single_ops(self) -> Dict[Tuple[int, int], np.ndarray]:
+        """Return cached single-particle basis operators ``|s><t|``."""
+        if self._single_ops_cache is None:
+            self._single_ops_cache = self._build_single_particle_ops()
+        return self._single_ops_cache
+
+    @property
+    def generators(self) -> Dict[Tuple[int, int], np.ndarray]:
+        """Return cached lifted one-body generators ``E_st``."""
+        if self._generators_cache is None:
+            self._generators_cache = self._build_generators()
+        return self._generators_cache
 
     def _build_single_particle_ops(self) -> Dict[Tuple[int, int], np.ndarray]:
         ops: Dict[Tuple[int, int], np.ndarray] = {}

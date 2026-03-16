@@ -13,6 +13,18 @@ Core user workflows:
 3. Evaluate invariants globally or on a local scope.
 4. Measure lifted one-body observables.
 
+Caching options on construction:
+
+- `PhotonicSystem(..., auto_cache=True, cache_dir=...)`
+- `PhotonicSystem.configure_global_cache(enabled=..., cache_dir=...)`
+
+Useful Fock backend helpers on system:
+
+- `PhotonicSystem.total_unitary_fock_from_single_particle`
+- `PhotonicSystem.evolve_density_fock`
+- `PhotonicSystem.save_fock_cache`
+- `PhotonicSystem.load_fock_cache`
+
 ## State Layer
 
 - `photonic_jordan.StateBuilder`
@@ -35,7 +47,8 @@ Common methods:
 Representation note:
 
 - `PhotonicState` does not store a fixed representation label.
-- Use `rho.density_matrix(rep='tensor'|'schur')` to retrieve matrix forms of the same state.
+- Use `rho.density_matrix(rep='tensor'|'fock'|'schur')` to retrieve matrix forms of the same state.
+- For `gram=1`, `StateBuilder.from_modes_and_gram` uses a symmetric Fock backend first.
 
 ## Decomposition Layer
 
@@ -61,6 +74,10 @@ Common methods:
 - `JordanFiltration.apply_projector_cumulative`
 - `InvariantEngine.commutator_error_layer`
 - `InvariantEngine.commutator_error_cumulative`
+
+Fock backend note:
+
+- When a state is currently backed by `fock` and query scope is global, `I_exact/I_cumulative` are evaluated in the symmetric hierarchy (`lambda=(n,)` sector-local equivalent).
 
 ## Measurement Layer
 
@@ -94,6 +111,14 @@ Scoped distribution behavior:
 Current non-goal:
 
 - generic POVM support is intentionally not included in this iteration.
+
+## Space Layer
+
+- `photonic_jordan.LabeledTensorSpace`
+- `photonic_jordan.BosonicFockSpace`
+
+The Fock backend is used for fully indistinguishable (`gram=1`) bosonic input states and can be requested explicitly via `rho.density_matrix(rep='fock')`.
+It also supports native lifted evolution in symmetric space.
 
 ## Documentation Conventions
 

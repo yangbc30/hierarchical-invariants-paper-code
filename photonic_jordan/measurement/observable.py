@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import numpy as np
 
@@ -47,33 +47,58 @@ class SingleParticleObservable:
             raise ValueError("Observable matrix must be Hermitian.")
         self.single_matrix = mat_h
 
-        self._total_matrix_cache: Optional[np.ndarray] = None
+        self._total_matrix_cache_tensor: Optional[np.ndarray] = None
+        self._total_matrix_cache_fock: Optional[np.ndarray] = None
 
-    def total_matrix(self, copy: bool = True) -> np.ndarray:
-        """Return lifted observable matrix ``J_n(A)`` in tensor basis.
+    def total_matrix(self, copy: bool = True, rep: str = "tensor") -> np.ndarray:
+        """Return lifted observable matrix ``J_n(A)``.
 
         Parameters
         ----------
         copy:
             If ``True``, return a defensive copy.
+        rep:
+            ``tensor`` or ``fock``.
 
         Returns
         -------
         np.ndarray
-            Tensor-basis lifted matrix.
+            Lifted matrix in requested representation.
         """
-        if self._total_matrix_cache is None:
-            m = self.system.spec.m_ext
-            dim = self.system.hilbert_dim
-            total = np.zeros((dim, dim), dtype=complex)
-            for s in range(m):
-                for t in range(m):
-                    coeff = self.single_matrix[s, t]
-                    if abs(coeff) > 0.0:
-                        total += coeff * self.system.space.generators[(s, t)]
-            self._total_matrix_cache = 0.5 * (total + total.conj().T)
+        rep_key = rep.strip().lower()
 
-        out = self._total_matrix_cache
+        if rep_key == "tensor":
+            if self._total_matrix_cache_tensor is None:
+                m = self.system.spec.m_ext
+                dim = self.system.hilbert_dim
+                total = np.zeros((dim, dim), dtype=complex)
+                for s in range(m):
+                    for t in range(m):
+                        coeff = self.single_matrix[s, t]
+                        if abs(coeff) > 0.0:
+                            total += coeff * self.system.space.generators[(s, t)]
+                self._total_matrix_cache_tensor = 0.5 * (total + total.conj().T)
+            out = self._total_matrix_cache_tensor
+
+        elif rep_key == "fock":
+            if self.system.fock_space is None:
+                raise NotImplementedError("Fock observable matrix is only available for bosonic systems.")
+            if self._total_matrix_cache_fock is None:
+                m = self.system.spec.m_ext
+                dim = self.system.fock_space.dim
+                total = np.zeros((dim, dim), dtype=complex)
+                gens = self.system.fock_generators()
+                for s in range(m):
+                    for t in range(m):
+                        coeff = self.single_matrix[s, t]
+                        if abs(coeff) > 0.0:
+                            total += coeff * gens[(s, t)]
+                self._total_matrix_cache_fock = 0.5 * (total + total.conj().T)
+            out = self._total_matrix_cache_fock
+
+        else:
+            raise ValueError("rep must be one of {'tensor', 'fock'}.")
+
         return out.copy() if copy else out
 
     @staticmethod
@@ -91,26 +116,40 @@ class SingleParticleObservable:
         groups.append(current)
         return groups
 
-    def _scoped_density(
+    def _resolve_scope(
+        self,
+        sector: Optional["Partition"],
+        multiplicity: Optional["MultiplicityLabel"],
+        copy: Optional["MultiplicityLabel"],
+    ) -> Tuple[Optional["Partition"], Optional["MultiplicityLabel"]]:
+        active = self.system._resolve_multiplicity_arg(multiplicity, copy)
+        self.system._validate_scope_inputs(sector=sector, multiplicity=active)
+        return sector, active
+
+    def _density_and_operator(
         self,
         state: "PhotonicState",
         sector: Optional["Partition"],
         multiplicity: Optional["MultiplicityLabel"],
-        copy: Optional["MultiplicityLabel"],
         conditional: bool,
         tol: float,
-    ) -> Tuple[np.ndarray, float]:
+    ) -> Tuple[np.ndarray, float, np.ndarray]:
         if state.system is not self.system:
             raise ValueError("Observable and state must belong to the same PhotonicSystem instance.")
 
-        rho = self.system.project_density_to_scope(
-            state.density_matrix(rep="tensor", copy=False),
-            sector=sector,
-            multiplicity=multiplicity,
-            copy=copy,
-        )
-        weight = float(np.real(np.trace(rho)))
+        use_fock = sector is None and multiplicity is None and state.has_rep("fock")
+        if use_fock:
+            rho = state.density_matrix(rep="fock", copy=False)
+            O = self.total_matrix(copy=False, rep="fock")
+        else:
+            rho = self.system.project_density_to_scope(
+                state.density_matrix(rep="tensor", copy=False),
+                sector=sector,
+                multiplicity=multiplicity,
+            )
+            O = self.total_matrix(copy=False, rep="tensor")
 
+        weight = float(np.real(np.trace(rho)))
         if weight < -tol:
             raise ValueError("Scoped density has negative trace outside tolerance.")
         if abs(weight) <= tol:
@@ -121,7 +160,7 @@ class SingleParticleObservable:
                 raise ValueError("Cannot condition on a zero-weight scope.")
             rho = rho / weight
 
-        return rho, weight
+        return rho, weight, O
 
     def expectation(
         self,
@@ -132,15 +171,14 @@ class SingleParticleObservable:
         conditional: bool = False,
     ) -> float:
         """Return expectation value of the lifted observable."""
-        rho, _ = self._scoped_density(
+        sector, multiplicity = self._resolve_scope(sector=sector, multiplicity=multiplicity, copy=copy)
+        rho, _, O = self._density_and_operator(
             state,
             sector=sector,
             multiplicity=multiplicity,
-            copy=copy,
             conditional=conditional,
             tol=1e-12,
         )
-        O = self.total_matrix(copy=False)
         value = np.trace(safe_matmul(rho, O))
         return float(np.real(value))
 
@@ -153,15 +191,14 @@ class SingleParticleObservable:
         conditional: bool = False,
     ) -> float:
         """Return variance of the lifted observable."""
-        rho, _ = self._scoped_density(
+        sector, multiplicity = self._resolve_scope(sector=sector, multiplicity=multiplicity, copy=copy)
+        rho, _, O = self._density_and_operator(
             state,
             sector=sector,
             multiplicity=multiplicity,
-            copy=copy,
             conditional=conditional,
             tol=1e-12,
         )
-        O = self.total_matrix(copy=False)
         O2 = safe_matmul(O, O)
         mean = float(np.real(np.trace(safe_matmul(rho, O))))
         second = float(np.real(np.trace(safe_matmul(rho, O2))))
@@ -182,18 +219,16 @@ class SingleParticleObservable:
         - ``conditional=False`` returns unnormalized scope contribution.
         - ``conditional=True`` returns normalized conditional distribution.
         """
-        rho, weight = self._scoped_density(
+        sector, multiplicity = self._resolve_scope(sector=sector, multiplicity=multiplicity, copy=copy)
+        rho, weight, O = self._density_and_operator(
             state,
             sector=sector,
             multiplicity=multiplicity,
-            copy=copy,
             conditional=conditional,
             tol=tol,
         )
 
-        O = self.total_matrix(copy=False)
         O = 0.5 * (O + O.conj().T)
-
         evals, vecs = np.linalg.eigh(O)
         groups = self._cluster_eigenvalues(evals, tol=tol)
 

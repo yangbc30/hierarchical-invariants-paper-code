@@ -1,4 +1,4 @@
-# Photonic Jordan Framework (Research Prototype)
+# Linear Optics Toolkit (Research Prototype)
 
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yangbc30/hierarchical-invariants-paper-code/blob/main/notebooks/demo_colab.ipynb)
 
@@ -69,6 +69,7 @@ print(rho_out.analyze(max_order=3))
 
 # Same physical state in different matrix representations
 rho_tensor = rho_out.density_matrix(rep="tensor")
+rho_fock = rho_out.density_matrix(rep="fock")  # bosonic systems
 rho_schur = rho_out.density_matrix(rep="schur")
 
 # Observable measurement (v1: lifted single-particle Hermitian observables)
@@ -76,7 +77,17 @@ obs = sys.observable.sigma_z(modes=(0, 1))
 print(rho_out.measure.expectation(obs))
 print(rho_out.measure.variance(obs))
 print(rho_out.measure.distribution(obs))
+
+# Optional: persist Fock cache (generators + built hierarchy)
+sys.save_fock_cache("cache_m3_n3.npz", max_order=3, include_generators=True)
+sys.load_fock_cache("cache_m3_n3.npz")
 ```
+
+Auto-cache behavior:
+
+- `PhotonicSystem(..., auto_cache=True, cache_dir=...)` controls per-instance automatic Fock cache persistence.
+- default is enabled, stored under `~/.cache/linear_optics_toolkit/`.
+- global default can be changed via `PhotonicSystem.configure_global_cache(...)`.
 
 ## Install
 
@@ -94,7 +105,7 @@ python3 -m venv .venv
 ## Package Layout
 
 - `photonic_jordan/math/`: linear algebra helpers.
-- `photonic_jordan/spaces/`: labeled tensor space and symmetric-group projectors.
+- `photonic_jordan/spaces/`: labeled tensor space, bosonic Fock backend, and symmetric-group projectors.
 - `photonic_jordan/hierarchy/`: Jordan filtration and invariant diagnostics.
 - `photonic_jordan/measurement/`: one-body observable construction and measurement views.
 - `photonic_jordan/state/`: state factory, state object, user-facing builders.
@@ -118,6 +129,15 @@ python3 -m venv .venv
 ```
 
 GitHub Pages will deploy docs automatically from the workflow in `.github/workflows/docs-pages.yml`.
+
+## Performance Guidance
+
+- The dense labeled-space dimension is `d = m_ext ** n_particles`.
+- Memory/time grow quickly with `d` (and generator-heavy workflows scale with `m_ext^2 * d^2` storage).
+- For fully indistinguishable inputs (`gram=1`), state construction now uses a bosonic Fock backend of dimension `C(m_ext+n_particles-1, n_particles)` and avoids eager tensor-space density construction.
+- Fock-backed states now evolve with a native lifted unitary in symmetric space (`rho.evolve(S)` stays in Fock cache unless tensor is explicitly requested).
+- In this Fock path, global `rho.invariant.*` values correspond to the symmetric-sector local hierarchy (the `lambda=(n,)` block in tensor Schur language).
+- See `docs/performance.md` for measured examples up to mode/particle counts near `6`.
 
 ## Online Demo
 

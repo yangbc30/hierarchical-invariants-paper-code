@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
 from typing import Dict, Optional, Tuple, Union
+import warnings
 
 import numpy as np
 
@@ -11,7 +15,7 @@ from ..hierarchy import InvariantEngine, JordanFiltration
 from ..math import normalize_density, safe_matmul
 from ..measurement import ObservableFactory
 from ..schur import SchurWeylDecomposition
-from ..spaces import LabeledTensorSpace, SymmetricGroupProjectors
+from ..spaces import BosonicFockSpace, LabeledTensorSpace, SymmetricGroupProjectors
 from ..specs import ModelSpec
 from ..state import (
     ArrayLike,
@@ -41,22 +45,43 @@ class PhotonicSystem:
     3) ``multiplicity=(lambda, a)``.
     """
 
+    _GLOBAL_AUTO_CACHE: bool = True
+    _GLOBAL_CACHE_DIR: Path = (
+        Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "linear_optics_toolkit"
+    )
+
     def __init__(
         self,
         m_ext: int,
         n_particles: int,
         particle_type: str = "boson",
         rng: Optional[np.random.Generator] = None,
+        auto_cache: Optional[bool] = None,
+        cache_dir: Optional[Union[str, Path]] = None,
     ):
         self.spec = ModelSpec(m_ext=m_ext, n_particles=n_particles, particle_type=particle_type)
         self.space = LabeledTensorSpace(self.spec)
+        self._fock_space: Optional[BosonicFockSpace] = (
+            BosonicFockSpace(self.spec, tensor_space=self.space)
+            if self.spec.particle_type == "boson"
+            else None
+        )
         self.rng = np.random.default_rng() if rng is None else rng
 
         self._state_factory = StateFactory(self.space, rng=self.rng)
         self._dynamics = PassiveLODynamics(self.space)
-        self._filtration = JordanFiltration(self.space)
-        self._invariants = InvariantEngine(self._filtration, self._dynamics)
+        self._filtration: Optional[JordanFiltration] = None
+        self._invariants: Optional[InvariantEngine] = None
         self._built_order = -1
+        self._fock_filtration: Optional[JordanFiltration] = None
+        self._fock_built_order = -1
+        self.auto_cache = self._GLOBAL_AUTO_CACHE if auto_cache is None else bool(auto_cache)
+        if cache_dir is None:
+            self.cache_dir = self._GLOBAL_CACHE_DIR
+        else:
+            self.cache_dir = Path(cache_dir).expanduser()
+        self._fock_cache_dirty = False
+        self._cache_io_in_progress = False
 
         try:
             self._projectors = SymmetricGroupProjectors(self.space)
@@ -71,6 +96,10 @@ class PhotonicSystem:
         self.unitary = UnitaryFactory(self)
         self.observable = ObservableFactory(self)
 
+        if self.auto_cache:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            self._try_auto_load_fock_cache()
+
     @property
     def hilbert_dim(self) -> int:
         """Return external Hilbert dimension ``m_ext ** n_particles``."""
@@ -82,8 +111,35 @@ class PhotonicSystem:
         return self._dynamics
 
     @property
+    def fock_space(self) -> Optional[BosonicFockSpace]:
+        """Return bosonic fixed-``n`` Fock backend when available."""
+        return self._fock_space
+
+    @classmethod
+    def configure_global_cache(
+        cls,
+        enabled: bool = True,
+        cache_dir: Optional[Union[str, Path]] = None,
+    ) -> None:
+        """Configure default cache behavior for future ``PhotonicSystem`` instances."""
+        cls._GLOBAL_AUTO_CACHE = bool(enabled)
+        if cache_dir is not None:
+            cls._GLOBAL_CACHE_DIR = Path(cache_dir).expanduser()
+
+    def default_fock_cache_path(self) -> Path:
+        """Return canonical Fock cache path for current model."""
+        filename = (
+            f"fock_cache_v1_{self.spec.particle_type}_"
+            f"m{self.spec.m_ext}_n{self.spec.n_particles}.npz"
+        )
+        return self.cache_dir / filename
+
+    @property
     def invariants_engine(self) -> InvariantEngine:
         """Return invariant diagnostic helper bound to global filtration."""
+        if self._invariants is None:
+            self._filtration = JordanFiltration(self.space)
+            self._invariants = InvariantEngine(self._filtration, self._dynamics)
         return self._invariants
 
     @property
@@ -116,9 +172,243 @@ class PhotonicSystem:
         """
         if max_order is None:
             max_order = self.spec.n_particles
+        if self._filtration is None:
+            self._filtration = JordanFiltration(self.space)
+            self._invariants = InvariantEngine(self._filtration, self._dynamics)
         if max_order > self._built_order:
             self._filtration.build(max_order=max_order)
             self._built_order = max_order
+
+    def _mark_fock_cache_dirty(self) -> None:
+        if self.auto_cache:
+            self._fock_cache_dirty = True
+
+    def _try_auto_load_fock_cache(self) -> None:
+        if not self.auto_cache or self._fock_space is None:
+            return
+        path = self.default_fock_cache_path()
+        if not path.exists():
+            return
+        try:
+            self._cache_io_in_progress = True
+            self.load_fock_cache(path, load_generators=True, load_hierarchy=True)
+            self._fock_cache_dirty = False
+        except Exception as exc:
+            warnings.warn(
+                f"Failed to load fock cache from '{path}': {exc}. Will rebuild cache lazily.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        finally:
+            self._cache_io_in_progress = False
+
+    def _auto_save_fock_cache_if_needed(self, force: bool = False) -> None:
+        if (
+            not self.auto_cache
+            or self._fock_space is None
+            or self._cache_io_in_progress
+            or (not force and not self._fock_cache_dirty)
+        ):
+            return
+        path = self.default_fock_cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._cache_io_in_progress = True
+            self.save_fock_cache(path, max_order=None, include_generators=True)
+            self._fock_cache_dirty = False
+        finally:
+            self._cache_io_in_progress = False
+
+    def fock_generators(self) -> Dict[Tuple[int, int], np.ndarray]:
+        """Return Fock one-body generators and mark auto-cache dirty if newly built."""
+        if self._fock_space is None:
+            raise NotImplementedError("Fock backend is only available for particle_type='boson'.")
+        was_empty = self._fock_space._generators_cache is None
+        gens = self._fock_space.generators
+        if was_empty:
+            self._mark_fock_cache_dirty()
+            self._auto_save_fock_cache_if_needed()
+        return gens
+
+    def ensure_fock_filtration(self, max_order: Optional[int] = None) -> JordanFiltration:
+        """Build bosonic symmetric-space filtration up to ``max_order``.
+
+        Notes
+        -----
+        This backend is only available when ``particle_type='boson'``.
+        """
+        if self._fock_space is None:
+            raise NotImplementedError("Fock backend is only available for particle_type='boson'.")
+        if max_order is None:
+            max_order = self.spec.n_particles
+
+        gens = self.fock_generators()
+        if self._fock_filtration is None:
+            self._fock_filtration = JordanFiltration(
+                self._fock_space,
+                generator_list=list(gens.values()),
+            )
+        if max_order > self._fock_built_order:
+            self._fock_filtration.build(max_order=max_order)
+            self._fock_built_order = max_order
+            self._mark_fock_cache_dirty()
+            self._auto_save_fock_cache_if_needed()
+        return self._fock_filtration
+
+    def tensor_to_fock_operator(self, operator: np.ndarray) -> np.ndarray:
+        """Project tensor-basis operator into symmetric Fock basis."""
+        if self._fock_space is None:
+            raise NotImplementedError("Fock backend is only available for particle_type='boson'.")
+        op = np.asarray(operator, dtype=complex)
+        if op.shape != (self.hilbert_dim, self.hilbert_dim):
+            raise ValueError(f"Tensor operator must have shape {(self.hilbert_dim, self.hilbert_dim)}.")
+        V = self._fock_space.isometry_to_tensor
+        return safe_matmul(V.conj().T, op, V)
+
+    def fock_to_tensor_operator(self, operator: np.ndarray) -> np.ndarray:
+        """Embed Fock-basis operator into tensor basis using symmetric isometry."""
+        if self._fock_space is None:
+            raise NotImplementedError("Fock backend is only available for particle_type='boson'.")
+        op = np.asarray(operator, dtype=complex)
+        shape = (self._fock_space.dim, self._fock_space.dim)
+        if op.shape != shape:
+            raise ValueError(f"Fock operator must have shape {shape}.")
+        V = self._fock_space.isometry_to_tensor
+        return safe_matmul(V, op, V.conj().T)
+
+    def total_unitary_fock_from_single_particle(self, S: np.ndarray) -> np.ndarray:
+        """Return Fock-basis lifted unitary for single-particle ``S``."""
+        if self._fock_space is None:
+            raise NotImplementedError("Fock backend is only available for particle_type='boson'.")
+        S = self.unitary.from_matrix(S)
+        return self._fock_space.total_unitary_from_single_particle(S)
+
+    def evolve_density_fock(self, rho_fock: np.ndarray, S: np.ndarray) -> np.ndarray:
+        """Evolve Fock-basis density with native bosonic lifted unitary."""
+        if self._fock_space is None:
+            raise NotImplementedError("Fock backend is only available for particle_type='boson'.")
+        S = self.unitary.from_matrix(S)
+        return self._fock_space.evolve_density(rho_fock, S)
+
+    def save_fock_cache(
+        self,
+        path: Union[str, Path],
+        max_order: Optional[int] = None,
+        include_generators: bool = True,
+    ) -> None:
+        """Persist Fock generators and/or built Fock hierarchy to disk.
+
+        Parameters
+        ----------
+        path:
+            Output ``.npz`` file path.
+        max_order:
+            If provided, ensure Fock hierarchy is built up to this order before saving.
+        include_generators:
+            If ``True``, include cached Fock generators in the checkpoint.
+        """
+        if self._fock_space is None:
+            raise NotImplementedError("Fock backend is only available for particle_type='boson'.")
+        path = Path(path).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        old_io_flag = self._cache_io_in_progress
+        self._cache_io_in_progress = True
+        try:
+            if max_order is not None:
+                self.ensure_fock_filtration(max_order=max_order)
+
+            meta = {
+                "format": "photonic_jordan_fock_cache",
+                "version": 1,
+                "m_ext": int(self.spec.m_ext),
+                "n_particles": int(self.spec.n_particles),
+                "particle_type": self.spec.particle_type,
+            }
+            arrays: Dict[str, np.ndarray] = {"meta": np.array(json.dumps(meta))}
+
+            if include_generators:
+                gens = self.fock_generators()
+                for (s, t), G in gens.items():
+                    arrays[f"gen_{s}_{t}"] = G
+                arrays["has_generators"] = np.array(1, dtype=np.int64)
+            else:
+                arrays["has_generators"] = np.array(0, dtype=np.int64)
+
+            if self._fock_filtration is None or self._fock_built_order < 0:
+                arrays["fock_built_order"] = np.array(-1, dtype=np.int64)
+            else:
+                arrays["fock_built_order"] = np.array(self._fock_built_order, dtype=np.int64)
+                for j in range(self._fock_built_order + 1):
+                    arrays[f"cum_{j}"] = self._fock_filtration.cumulative_bases[j]
+                    arrays[f"lay_{j}"] = self._fock_filtration.layer_bases[j]
+
+            np.savez_compressed(path, **arrays)
+        finally:
+            self._cache_io_in_progress = old_io_flag
+        self._fock_cache_dirty = False
+
+    def load_fock_cache(
+        self,
+        path: Union[str, Path],
+        load_generators: bool = True,
+        load_hierarchy: bool = True,
+    ) -> None:
+        """Load persisted Fock generators/hierarchy from ``save_fock_cache``.
+
+        Parameters
+        ----------
+        path:
+            Input ``.npz`` checkpoint path.
+        load_generators:
+            If ``True``, restore Fock generator cache from checkpoint.
+        load_hierarchy:
+            If ``True``, restore built Fock hierarchy bases from checkpoint.
+        """
+        if self._fock_space is None:
+            raise NotImplementedError("Fock backend is only available for particle_type='boson'.")
+        path = Path(path).expanduser()
+
+        with np.load(path, allow_pickle=False) as data:
+            if "meta" not in data:
+                raise ValueError("Invalid fock cache file: missing metadata.")
+            meta = json.loads(str(data["meta"].item()))
+            if meta.get("format") != "photonic_jordan_fock_cache":
+                raise ValueError("Invalid fock cache format marker.")
+            if int(meta.get("m_ext", -1)) != self.spec.m_ext or int(meta.get("n_particles", -1)) != self.spec.n_particles:
+                raise ValueError(
+                    "Cache model mismatch: "
+                    f"file has (m_ext={meta.get('m_ext')}, n_particles={meta.get('n_particles')}), "
+                    f"system has (m_ext={self.spec.m_ext}, n_particles={self.spec.n_particles})."
+                )
+
+            if load_generators and int(data.get("has_generators", np.array(0))) == 1:
+                gens: Dict[Tuple[int, int], np.ndarray] = {}
+                for s in range(self.spec.m_ext):
+                    for t in range(self.spec.m_ext):
+                        key = f"gen_{s}_{t}"
+                        if key not in data:
+                            raise ValueError(f"Invalid fock cache: missing generator '{key}'.")
+                        gens[(s, t)] = np.asarray(data[key], dtype=complex)
+                self._fock_space._generators_cache = gens
+
+            if load_hierarchy and "fock_built_order" in data:
+                built_order = int(data["fock_built_order"])
+                if built_order >= 0:
+                    filtration = JordanFiltration(self._fock_space)
+                    filtration.cumulative_bases = {}
+                    filtration.layer_bases = {}
+                    for j in range(built_order + 1):
+                        key_c = f"cum_{j}"
+                        key_l = f"lay_{j}"
+                        if key_c not in data or key_l not in data:
+                            raise ValueError(f"Invalid fock cache: missing hierarchy basis for order {j}.")
+                        filtration.cumulative_bases[j] = np.asarray(data[key_c], dtype=complex)
+                        filtration.layer_bases[j] = np.asarray(data[key_l], dtype=complex)
+                    filtration._clear_projector_cache()
+                    self._fock_filtration = filtration
+                    self._fock_built_order = built_order
+        self._fock_cache_dirty = False
 
     @staticmethod
     def _resolve_multiplicity_arg(
@@ -226,6 +516,8 @@ class PhotonicSystem:
 
         if key == ("global",):
             self.ensure_filtration(max_order=max_order)
+            if self._filtration is None:
+                raise RuntimeError("Global filtration was not initialized.")
             return self._filtration
 
         if key not in self._scoped_filtrations:

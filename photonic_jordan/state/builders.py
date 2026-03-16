@@ -51,6 +51,16 @@ class StateBuilder:
             External density state ``rho_ext``.
         """
         G = resolve_gram_input(gram=gram, n_particles=self.system.spec.n_particles)
+
+        # Fast path: fully indistinguishable bosons live in the symmetric Fock sector.
+        if self.system.fock_space is not None and np.allclose(
+            G, np.ones((self.system.spec.n_particles, self.system.spec.n_particles), dtype=complex), atol=1e-10
+        ):
+            rho_f = self.system.fock_space.pure_density_from_modes(ext_modes)
+            if label is None:
+                label = f"modes={list(ext_modes)}, gram={gram_description(gram)}"
+            return PhotonicState(system=self.system, data=None, label=label, _cache={"fock": rho_f})
+
         rho = self.system._state_factory.from_external_modes_and_gram(ext_modes=ext_modes, gram=G)
         if label is None:
             label = f"modes={list(ext_modes)}, gram={gram_description(gram)}"

@@ -47,7 +47,9 @@ class JordanFiltration:
         self.space = space
         self.dim = space.dim
         self.liou_dim = self.dim ** 2
-        self.generator_list = list(space.generators.values()) if generator_list is None else list(generator_list)
+        self._generator_list: Optional[List[np.ndarray]] = None
+        if generator_list is not None:
+            self._generator_list = list(generator_list)
         self.seed_operator = (
             np.eye(self.dim, dtype=complex) if seed_operator is None else np.asarray(seed_operator, dtype=complex)
         )
@@ -59,6 +61,13 @@ class JordanFiltration:
         self.layer_bases: Dict[int, np.ndarray] = {}
         self._projector_cumulative_cache: Dict[int, np.ndarray] = {}
         self._projector_layer_cache: Dict[int, np.ndarray] = {}
+
+    @property
+    def generator_list(self) -> List[np.ndarray]:
+        """Return generator list, building default from space on first use."""
+        if self._generator_list is None:
+            self._generator_list = list(self.space.generators.values())
+        return self._generator_list
 
     def _clear_projector_cache(self) -> None:
         self._projector_cumulative_cache.clear()
