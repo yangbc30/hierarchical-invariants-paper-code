@@ -1,4 +1,4 @@
-"""Schur-Weyl decomposition helpers for small-``n`` demo scope."""
+"""Schur-Weyl decomposition helpers."""
 
 from __future__ import annotations
 
@@ -74,10 +74,7 @@ class SchurWeylDecomposition:
         dim = self.space.dim
         W = np.column_stack(cols) if cols else np.zeros((dim, 0), dtype=complex)
         if W.shape != (dim, dim):
-            raise RuntimeError(
-                "Schur basis construction did not produce a full basis. "
-                "Current demo only supports n=2,3 projectors."
-            )
+            raise RuntimeError("Schur basis construction did not produce a full basis.")
 
         unitary_err = la.norm(safe_matmul(W.conj().T, W) - np.eye(dim, dtype=complex))
         if unitary_err > 1e-6:
@@ -111,10 +108,9 @@ class SchurWeylDecomposition:
 
     def dim_mult(self, lam: Partition) -> int:
         """Return multiplicity dimension ``d_lambda`` for sector ``lambda``."""
-        table = self._projectors.CHARACTER_TABLE[self.space.n]
-        if lam not in table:
+        if lam not in self._partitions:
             raise KeyError(f"Unknown partition {lam}.")
-        return int(table[lam]["dim"])
+        return int(self._projectors.irrep_dimension(lam))
 
     def dim_U(self, lam: Partition) -> int:
         """Return irrep carrier dimension ``dim(U_lambda)``."""
@@ -250,7 +246,7 @@ class SchurWeylDecomposition:
         if successful is None:
             raise RuntimeError(
                 "Failed to resolve multiplicity projectors from commutant structure. "
-                "This demo implementation currently supports robust multiplicity resolution for small n."
+                "Try a smaller model or a different multiplicity convention."
             )
 
         projectors_full: List[np.ndarray] = []

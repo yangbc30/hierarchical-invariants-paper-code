@@ -63,12 +63,66 @@ class BosonicFockSpace:
             occ[idx] += 1
         return tuple(occ)
 
+    def validate_occupation(self, occupation: Sequence[int]) -> Tuple[int, ...]:
+        """Validate and return occupation tuple ``(n_0,...,n_{m-1})``."""
+        occ = tuple(int(x) for x in occupation)
+        if len(occ) != self.m:
+            raise ValueError(f"Occupation must have length m_ext={self.m}.")
+        if any(x < 0 for x in occ):
+            raise ValueError("Occupation entries must be nonnegative.")
+        if sum(occ) != self.n:
+            raise ValueError(
+                f"Occupation total must equal n_particles={self.n}, got {sum(occ)}."
+            )
+        return occ
+
+    def index_from_occupation(self, occupation: Sequence[int]) -> int:
+        """Return basis index for a validated occupation tuple."""
+        occ = self.validate_occupation(occupation)
+        return self.state_to_index[occ]
+
+    def pure_density_from_occupation(self, occupation: Sequence[int]) -> np.ndarray:
+        """Return pure Fock-basis density for occupation ``(n_0,...,n_{m-1})``."""
+        idx = self.index_from_occupation(occupation)
+        rho = np.zeros((self.dim, self.dim), dtype=complex)
+        rho[idx, idx] = 1.0
+        return rho
+
+    def mixed_density_from_occupations(
+        self,
+        occupations: Sequence[Sequence[int]],
+        weights: Sequence[float],
+        normalize: bool = True,
+    ) -> np.ndarray:
+        """Return classical Fock mixture density from occupations and weights."""
+        if len(occupations) == 0:
+            raise ValueError("occupations must be non-empty.")
+        if len(occupations) != len(weights):
+            raise ValueError("occupations and weights must have the same length.")
+
+        probs = np.asarray(weights, dtype=float)
+        if np.any(probs < -1e-12):
+            raise ValueError("weights must be nonnegative (within tolerance).")
+        probs[probs < 0.0] = 0.0
+        total = float(np.sum(probs))
+        if normalize:
+            if total <= 0.0:
+                raise ValueError("weights must have positive sum.")
+            probs = probs / total
+
+        rho = np.zeros((self.dim, self.dim), dtype=complex)
+        for occ, p in zip(occupations, probs):
+            idx = self.index_from_occupation(occ)
+            rho[idx, idx] += float(p)
+
+        if normalize and float(np.real(np.trace(rho))) > 0.0:
+            rho = rho / np.trace(rho)
+        return rho
+
     def pure_density_from_modes(self, ext_modes: Sequence[int]) -> np.ndarray:
         """Return pure Fock-basis density for occupation determined by ``ext_modes``."""
         occ = self.occupation_from_modes(ext_modes)
-        rho = np.zeros((self.dim, self.dim), dtype=complex)
-        rho[self.state_to_index[occ], self.state_to_index[occ]] = 1.0
-        return rho
+        return self.pure_density_from_occupation(occ)
 
     def _multinomial_norm(self, occ: Tuple[int, ...]) -> float:
         """Return ``sqrt(n! / prod_k n_k!)`` for occupation ``occ``."""

@@ -13,51 +13,71 @@ python3 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
-## Minimal Example
+## 1) State Construction
+
+```python
+from photonic_jordan import Fock, FockMixed, from_fock_density, from_modes_and_gram
+
+rho = from_modes_and_gram([0, 1, 0], gram=0.4, m_ext=2)
+rho_fock = Fock(2, 1, 0)
+rho_mix = FockMixed((0.6, 2, 1, 0), (0.4, 1, 2, 0))
+# rho_adv = from_fock_density(rho_fock_matrix, m_ext=3, n_particles=3)
+```
+
+## 2) State Algebra
 
 ```python
 import numpy as np
-from photonic_jordan import PhotonicSystem
+from photonic_jordan import Fock, from_modes_and_gram
 
-sys = PhotonicSystem(m_ext=2, n_particles=3, rng=np.random.default_rng(0), auto_cache=True)
-rho = sys.state.from_modes_and_gram([0, 1, 0], gram=0.4)
+rho_a = from_modes_and_gram([0, 1, 0], gram=0.4, m_ext=2)
+rho_b = from_modes_and_gram([0, 1, 0], gram=0.2, system=rho_a.system)
 
-# Global hierarchy
-print(rho.invariant.I_exact(1))
-print(rho.invariant.I_cumulative(2))
+# classical mixture
+rho_classical = rho_a.mix(rho_b, weight=0.3)
 
-# Sector-local hierarchy
-lam = (2, 1)
-print(rho.invariant.I_exact(1, sector=lam))
+# coherent superposition (pure states only)
+rho_p = Fock(1, 0)
+rho_q = Fock(0, 1, system=rho_p.system)
+rho_coherent = rho_p.superpose(rho_q, alpha=1.0, beta=1j)
+```
 
-# Multiplicity-local hierarchy
-print(rho.invariant.I_exact(1, multiplicity=(lam, 0)))
+## 3) State Evolution
 
-# Same state in different representations
-rho_tensor = rho.density_matrix(rep=\"tensor\")
-rho_fock = rho.density_matrix(rep=\"fock\")  # bosonic systems
-rho_schur = rho.density_matrix(rep=\"schur\")
-print(rho_tensor.shape, rho_fock.shape, rho_schur.shape)
+```python
+S = rho.system.unitary.haar(seed=7)
+rho_out = rho.evolve(S)
+```
 
-# Observable measurement
-obs = sys.observable.sigma_z(modes=(0, 1))
-print(rho.measure.expectation(obs))
-print(rho.measure.variance(obs))
-print(rho.measure.distribution(obs))
+## 4) Invariant Computation
 
-# Fully indistinguishable shortcut (fast Fock backend)
-rho_sym = sys.state.from_modes_and_gram([0, 1, 0], gram=1)
-print(rho_sym.has_rep(\"fock\"), rho_sym.has_rep(\"tensor\"))
-print(rho_sym.density_matrix(rep=\"fock\").shape)
+```python
+print(rho_out.invariant.I_exact(1))
+print(rho_out.invariant.I_cumulative(2))
+print(rho_out.invariant.I_exact(1, sector=(2, 1)))
+print(rho_out.invariant.I_exact(1, multiplicity=((2, 1), 0)))
+```
 
-# Native Fock evolution for fock-backed states
-S = sys.unitary.haar(seed=7)
-rho_sym_out = rho_sym.evolve(S)
-print(rho_sym_out.has_rep(\"fock\"), rho_sym_out.has_rep(\"tensor\"))
+## 5) Observable Measurement
 
-# Optional: save/load expensive Fock caches
-sys.save_fock_cache(\"cache_m2_n3.npz\", max_order=3, include_generators=True)
-sys.load_fock_cache(\"cache_m2_n3.npz\")
+```python
+obs = rho_out.system.observable.sigma_z(modes=(0, 1))
+print(rho_out.measure.expectation(obs))
+print(rho_out.measure.variance(obs))
+print(rho_out.measure.distribution(obs))
+```
+
+## Optional: Representations and Cache
+
+```python
+rho_tensor = rho_out.density_matrix(rep="tensor")
+rho_fock = rho_out.density_matrix(rep="fock")
+rho_schur = rho_out.density_matrix(rep="schur")
+
+rho_out.system.save_fock_cache("cache_m2_n3.npz", max_order=3, include_generators=True)
+rho_out.system.load_fock_cache("cache_m2_n3.npz")
+rho_out.system.save_schur_cache("schur_cache_m2_n3.npz", include_multiplicity=True)
+rho_out.system.load_schur_cache("schur_cache_m2_n3.npz")
 ```
 
 By default, automatic cache persistence is enabled and stored under

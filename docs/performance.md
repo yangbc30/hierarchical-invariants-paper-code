@@ -85,8 +85,9 @@ Notes:
 - The Fock backend currently targets bosonic fully indistinguishable input paths.
 - Global invariant queries on Fock-backed states correspond to the symmetric-sector local hierarchy (`lambda=(n,)` in tensor/Schur language).
 - If you repeatedly use fixed `(m_ext, n_particles)`, persist caches with
-  `save_fock_cache(...)` and reload with `load_fock_cache(...)` to avoid
-  rebuilding generators and hierarchy bases.
+  `save_fock_cache(...)`/`load_fock_cache(...)` and
+  `save_schur_cache(...)`/`load_schur_cache(...)` to avoid rebuilding
+  generators, hierarchy bases, and Schur decomposition data.
 - Automatic cache persistence is enabled by default:
   `PhotonicSystem(..., auto_cache=True, cache_dir=...)`.
 

@@ -66,6 +66,45 @@ class StateBuilder:
             label = f"modes={list(ext_modes)}, gram={gram_description(gram)}"
         return PhotonicState(system=self.system, data=rho, label=label)
 
+    def from_fock(self, occupation: Sequence[int], label: Optional[str] = None) -> PhotonicState:
+        """Construct pure bosonic Fock state ``|n_0,...,n_{m-1}><...|``."""
+        if self.system.fock_space is None:
+            raise NotImplementedError("Fock constructors are only available for particle_type='boson'.")
+        rho_f = self.system.fock_space.pure_density_from_occupation(occupation)
+        if label is None:
+            label = f"fock={tuple(int(x) for x in occupation)}"
+        return PhotonicState(system=self.system, data=None, label=label, _cache={"fock": rho_f})
+
+    def from_fock_mixture(
+        self,
+        occupations: Sequence[Sequence[int]],
+        weights: Sequence[float],
+        label: Optional[str] = None,
+        normalize: bool = True,
+    ) -> PhotonicState:
+        """Construct classical mixture of bosonic Fock occupation states."""
+        if self.system.fock_space is None:
+            raise NotImplementedError("Fock constructors are only available for particle_type='boson'.")
+        rho_f = self.system.fock_space.mixed_density_from_occupations(
+            occupations=occupations,
+            weights=weights,
+            normalize=normalize,
+        )
+        if label is None:
+            label = "fock mixed state"
+        return PhotonicState(system=self.system, data=None, label=label, _cache={"fock": rho_f})
+
+    def from_fock_density(self, rho_fock: ArrayLike, label: Optional[str] = None) -> PhotonicState:
+        """Wrap user-provided Fock-basis density matrix into :class:`PhotonicState`."""
+        if self.system.fock_space is None:
+            raise NotImplementedError("Fock constructors are only available for particle_type='boson'.")
+        arr = np.asarray(rho_fock, dtype=complex)
+        shape = (self.system.fock_space.dim, self.system.fock_space.dim)
+        if arr.shape != shape:
+            raise ValueError(f"Fock density matrix must have shape {shape}.")
+        arr = normalize_density(arr)
+        return PhotonicState(system=self.system, data=None, label=label, _cache={"fock": arr})
+
     def from_density_matrix(
         self,
         rho: ArrayLike,
@@ -103,7 +142,7 @@ class StateBuilder:
         rho = normalize_density(safe_matmul(x, x.conj().T))
 
         if self.system.projectors is None:
-            raise NotImplementedError("Commutant twirl helper currently supports n=2,3 via demo projectors.")
+            raise NotImplementedError("Commutant twirl helper requires symmetric-group projectors.")
 
         twirled = np.zeros_like(rho)
         perms = list(permutations(range(self.system.spec.n_particles)))

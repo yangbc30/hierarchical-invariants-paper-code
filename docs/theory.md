@@ -26,5 +26,5 @@ Multiplicity basis is not unique mathematically. This package fixes labels by a 
 
 ## Limitations
 
-- current Schur projector implementation is explicit for `n=2,3`,
+- Schur projector construction scales through permutation sums and is therefore expensive at larger `n`,
 - prototype is optimized for numerical verification and reproducibility, not large-scale production workloads.

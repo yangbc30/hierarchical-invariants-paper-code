@@ -15,7 +15,7 @@ The implementation supports:
 Current prototype focus:
 
 - first-quantized external space `(C^m)^{\otimes n}`,
-- exact support for Schur projectors at `n=2,3`,
+- exact Schur projector construction for general `n` (computationally heavier as `n` grows),
 - reproducible decomposition for small-scale numerical checks accompanying theory papers.
 
 ## Why This Is Useful For Papers

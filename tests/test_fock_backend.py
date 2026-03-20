@@ -110,6 +110,22 @@ def test_system_evolve_density_fock_matches_state_evolve():
     assert np.allclose(rho_out_state, rho_out_system, atol=1e-10)
 
 
+def test_state_builder_from_fock_mixture():
+    sys = PhotonicSystem(m_ext=3, n_particles=3, rng=np.random.default_rng(216), auto_cache=False)
+    rho = sys.state.from_fock_mixture(
+        occupations=[(2, 1, 0), (1, 2, 0)],
+        weights=[0.25, 0.75],
+    )
+
+    rho_f = rho.density_matrix(rep="fock", copy=False)
+    fs = sys.fock_space
+    assert fs is not None
+    i1 = fs.index_from_occupation((2, 1, 0))
+    i2 = fs.index_from_occupation((1, 2, 0))
+    assert abs(float(np.real(rho_f[i1, i1])) - 0.25) < 1e-12
+    assert abs(float(np.real(rho_f[i2, i2])) - 0.75) < 1e-12
+
+
 def test_save_load_fock_cache_roundtrip(tmp_path):
     path = tmp_path / "fock_cache_m2_n3.npz"
 

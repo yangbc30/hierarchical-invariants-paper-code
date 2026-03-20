@@ -50,42 +50,66 @@ Basis-dependent:
   - multiplicity-local: `Q_{lambda,a} E_st Q_{lambda,a}`
 - For reduced external states from permutation-symmetric totals, Schur blocks are the natural decomposition.
 
-## Canonical Workflow
+## Most Direct Workflow (State-First)
+
+### 1) State Construction
+
+```python
+from photonic_jordan import Fock, FockMixed, from_fock_density, from_modes_and_gram
+
+rho = from_modes_and_gram([0, 1, 0], gram=0.5, m_ext=2)
+rho_fock = Fock(2, 1, 0)
+rho_mix = FockMixed((0.7, 2, 1, 0), (0.3, 1, 2, 0))
+# rho_adv = from_fock_density(rho_fock_matrix, m_ext=3, n_particles=3)
+```
+
+### 2) State Algebra (Classical Mix / Coherent Superposition)
 
 ```python
 import numpy as np
-from photonic_jordan import PhotonicSystem
+from photonic_jordan import Fock, from_modes_and_gram
 
-sys = PhotonicSystem(m_ext=3, n_particles=3, particle_type="boson")
-rho = sys.state.from_modes_and_gram([0, 1, 2], gram="indistinguishable")
+rho_a = from_modes_and_gram([0, 1, 0], gram=0.4, m_ext=2)
+rho_b = from_modes_and_gram([0, 1, 0], gram=0.2, system=rho_a.system)
+rho_classical = rho_a.mix(rho_b, weight=0.4)
 
-S = sys.unitary.haar(seed=123)
-rho_out = rho.evolve(S)
+rho_p = Fock(1, 0)
+rho_q = Fock(0, 1, system=rho_p.system)
+rho_coherent = rho_p.superpose(
+    rho_q,
+    alpha=np.sqrt(0.8),
+    beta=np.sqrt(0.2) * np.exp(1j * np.pi / 3),
+)
+```
 
+### 3) State Evolution
+
+```python
+S = rho_a.system.unitary.haar(seed=123)
+rho_out = rho_a.evolve(S)
+```
+
+### 4) Invariant Computation
+
+```python
 print(rho_out.invariant.I_exact(2))
 print(rho_out.invariant.I_exact(2, sector=(2, 1)))
 print(rho_out.invariant.I_exact(2, multiplicity=((2, 1), 0)))
 print(rho_out.analyze(max_order=3))
+```
 
-# Same physical state in different matrix representations
-rho_tensor = rho_out.density_matrix(rep="tensor")
-rho_fock = rho_out.density_matrix(rep="fock")  # bosonic systems
-rho_schur = rho_out.density_matrix(rep="schur")
+### 5) Observable Measurement
 
-# Observable measurement (v1: lifted single-particle Hermitian observables)
-obs = sys.observable.sigma_z(modes=(0, 1))
+```python
+obs = rho_out.system.observable.sigma_z(modes=(0, 1))
 print(rho_out.measure.expectation(obs))
 print(rho_out.measure.variance(obs))
 print(rho_out.measure.distribution(obs))
-
-# Optional: persist Fock cache (generators + built hierarchy)
-sys.save_fock_cache("cache_m3_n3.npz", max_order=3, include_generators=True)
-sys.load_fock_cache("cache_m3_n3.npz")
 ```
 
 Auto-cache behavior:
 
-- `PhotonicSystem(..., auto_cache=True, cache_dir=...)` controls per-instance automatic Fock cache persistence.
+- `PhotonicSystem(..., auto_cache=True, cache_dir=...)` controls per-instance automatic Fock + Schur cache persistence.
 - default is enabled, stored under `~/.cache/linear_optics_toolkit/`.
 - global default can be changed via `PhotonicSystem.configure_global_cache(...)`.
 

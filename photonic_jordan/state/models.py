@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -342,6 +342,331 @@ class PhotonicState:
         if len(self._cache) == 0:
             raise ValueError("State cache is empty after initialization.")
 
+    @classmethod
+    def from_modes_and_gram(
+        cls,
+        ext_modes: Sequence[int],
+        gram: GramInput = "indistinguishable",
+        *,
+        m_ext: Optional[int] = None,
+        particle_type: str = "boson",
+        rng: Optional[np.random.Generator] = None,
+        label: Optional[str] = None,
+        system: Optional["PhotonicSystem"] = None,
+        auto_cache: Optional[bool] = None,
+        cache_dir: Optional[str] = None,
+    ) -> "PhotonicState":
+        """State-first constructor from external modes and internal Gram matrix.
+
+        Parameters
+        ----------
+        ext_modes:
+            External mode assignment for each labeled particle.
+        gram:
+            Internal overlap model. Accepts shortcut strings, scalar overlap, or
+            explicit Gram matrix.
+        m_ext:
+            Number of external modes. If omitted and ``system`` is not provided,
+            inferred as ``max(ext_modes)+1``.
+        particle_type:
+            Particle-type label passed to :class:`PhotonicSystem` when ``system``
+            is not provided.
+        rng:
+            Optional RNG passed to :class:`PhotonicSystem` when ``system`` is not
+            provided.
+        label:
+            Optional state label.
+        system:
+            Existing system context. If provided, no new system is created.
+        auto_cache:
+            Optional cache switch used only when creating a new system.
+        cache_dir:
+            Optional cache directory used only when creating a new system.
+        """
+        modes = [int(x) for x in ext_modes]
+        if len(modes) == 0:
+            raise ValueError("ext_modes must be non-empty.")
+        if any(x < 0 for x in modes):
+            raise ValueError("ext_modes must contain nonnegative mode indices.")
+        n_particles = len(modes)
+
+        if system is None:
+            resolved_m = (max(modes) + 1) if m_ext is None else int(m_ext)
+            if resolved_m <= 0:
+                raise ValueError("m_ext must be positive.")
+            if max(modes) >= resolved_m:
+                raise ValueError("ext_modes contains an index >= m_ext.")
+            from ..system import PhotonicSystem
+
+            system = PhotonicSystem(
+                m_ext=resolved_m,
+                n_particles=n_particles,
+                particle_type=particle_type,
+                rng=rng,
+                auto_cache=auto_cache,
+                cache_dir=cache_dir,
+            )
+        else:
+            if system.spec.n_particles != n_particles:
+                raise ValueError(
+                    f"Provided system has n_particles={system.spec.n_particles}, "
+                    f"but ext_modes implies n_particles={n_particles}."
+                )
+            if max(modes) >= system.spec.m_ext:
+                raise ValueError("ext_modes contains an index outside provided system.m_ext.")
+
+        return system.state.from_modes_and_gram(modes, gram=gram, label=label)
+
+    @classmethod
+    def from_occupation(
+        cls,
+        occupation: Sequence[int],
+        *,
+        label: Optional[str] = None,
+        system: Optional["PhotonicSystem"] = None,
+        particle_type: str = "boson",
+        rng: Optional[np.random.Generator] = None,
+        auto_cache: Optional[bool] = None,
+        cache_dir: Optional[str] = None,
+    ) -> "PhotonicState":
+        """State-first constructor from bosonic occupation numbers.
+
+        Parameters
+        ----------
+        occupation:
+            Occupation tuple/list ``(n_0, ..., n_{m-1})``.
+        label:
+            Optional state label.
+        system:
+            Existing system context. If provided, must match ``m_ext`` and
+            ``n_particles`` implied by ``occupation``.
+        particle_type:
+            Particle-type label used when creating a new system.
+        rng:
+            Optional RNG used when creating a new system.
+        auto_cache:
+            Optional cache switch used only when creating a new system.
+        cache_dir:
+            Optional cache directory used only when creating a new system.
+        """
+        occ = [int(x) for x in occupation]
+        if len(occ) == 0:
+            raise ValueError("occupation must be non-empty.")
+        if any(x < 0 for x in occ):
+            raise ValueError("occupation entries must be nonnegative integers.")
+
+        if sum(occ) == 0:
+            raise ValueError("Total particle number must be positive.")
+
+        if system is None:
+            from ..system import PhotonicSystem
+
+            system = PhotonicSystem(
+                m_ext=len(occ),
+                n_particles=int(sum(occ)),
+                particle_type=particle_type,
+                rng=rng,
+                auto_cache=auto_cache,
+                cache_dir=cache_dir,
+            )
+        else:
+            if system.spec.m_ext != len(occ):
+                raise ValueError(
+                    f"Provided system has m_ext={system.spec.m_ext}, "
+                    f"but occupation implies m_ext={len(occ)}."
+                )
+            if system.spec.n_particles != int(sum(occ)):
+                raise ValueError(
+                    f"Provided system has n_particles={system.spec.n_particles}, "
+                    f"but occupation implies n_particles={sum(occ)}."
+                )
+
+        return system.state.from_fock(occupation=occ, label=label)
+
+    @classmethod
+    def Fock(
+        cls,
+        *occupation: int,
+        label: Optional[str] = None,
+        system: Optional["PhotonicSystem"] = None,
+        particle_type: str = "boson",
+        rng: Optional[np.random.Generator] = None,
+        auto_cache: Optional[bool] = None,
+        cache_dir: Optional[str] = None,
+    ) -> "PhotonicState":
+        """State-first constructor for bosonic Fock occupation numbers.
+
+        Parameters
+        ----------
+        occupation:
+            Variadic occupation numbers ``(n_0, n_1, ..., n_{m-1})``.
+        label:
+            Optional state label.
+        system:
+            Existing system context. If provided, must match ``m_ext`` and
+            ``n_particles`` implied by ``occupation``.
+        particle_type:
+            Particle-type label used when creating a new system.
+        rng:
+            Optional RNG used when creating a new system.
+        auto_cache:
+            Optional cache switch used only when creating a new system.
+        cache_dir:
+            Optional cache directory used only when creating a new system.
+        """
+        occ = occupation
+        if len(occ) == 1 and isinstance(occ[0], (list, tuple, np.ndarray)):
+            occ = tuple(int(x) for x in occ[0])  # backward-compatible fallback
+        return cls.from_occupation(
+            occupation=occ,
+            label=label,
+            system=system,
+            particle_type=particle_type,
+            rng=rng,
+            auto_cache=auto_cache,
+            cache_dir=cache_dir,
+        )
+
+    @classmethod
+    def FockMixed(
+        cls,
+        *terms,
+        label: Optional[str] = None,
+        system: Optional["PhotonicSystem"] = None,
+        m_ext: Optional[int] = None,
+        particle_type: str = "boson",
+        rng: Optional[np.random.Generator] = None,
+        auto_cache: Optional[bool] = None,
+        cache_dir: Optional[str] = None,
+        normalize: bool = True,
+    ) -> "PhotonicState":
+        """State-first constructor for classical mixtures of Fock occupations.
+
+        Parameters
+        ----------
+        terms:
+            Mixture terms, each written as either ``(p, n0, n1, ..., n_{m-1})``
+            or ``(p, [n0, n1, ..., n_{m-1}])``.
+        label:
+            Optional state label.
+        system:
+            Existing system context. If provided, occupations must be compatible.
+        m_ext:
+            Number of external modes. Used only when ``system`` is not provided.
+            If omitted, inferred from the longest occupation term.
+        particle_type:
+            Particle-type label used when creating a new system.
+        rng:
+            Optional RNG used when creating a new system.
+        auto_cache:
+            Optional cache switch used only when creating a new system.
+        cache_dir:
+            Optional cache directory used only when creating a new system.
+        normalize:
+            If ``True`` (default), normalize mixture weights to unit trace.
+        """
+        if len(terms) == 0:
+            raise ValueError("FockMixed requires at least one mixture term.")
+
+        parsed_weights: List[float] = []
+        parsed_occupations: List[Tuple[int, ...]] = []
+        for term in terms:
+            if not isinstance(term, (tuple, list)) or len(term) < 2:
+                raise ValueError(
+                    "Each FockMixed term must be (weight, n0, n1, ...) or (weight, occupation_sequence)."
+                )
+            weight = float(term[0])
+            if len(term) == 2 and isinstance(term[1], (list, tuple, np.ndarray)):
+                occ = tuple(int(x) for x in term[1])
+            else:
+                occ = tuple(int(x) for x in term[1:])
+            if len(occ) == 0:
+                raise ValueError("Occupation term must contain at least one mode.")
+            if any(x < 0 for x in occ):
+                raise ValueError("Occupation entries must be nonnegative.")
+            parsed_weights.append(weight)
+            parsed_occupations.append(occ)
+
+        if system is None:
+            resolved_m = max(len(occ) for occ in parsed_occupations) if m_ext is None else int(m_ext)
+            if resolved_m <= 0:
+                raise ValueError("m_ext must be positive.")
+            padded = [occ + (0,) * (resolved_m - len(occ)) for occ in parsed_occupations]
+            if any(len(occ) > resolved_m for occ in parsed_occupations):
+                raise ValueError("Provided m_ext is smaller than at least one occupation term.")
+            n_particles = sum(padded[0])
+            if any(sum(occ) != n_particles for occ in padded):
+                raise ValueError("All Fock mixture terms must have the same total particle number.")
+
+            from ..system import PhotonicSystem
+
+            system = PhotonicSystem(
+                m_ext=resolved_m,
+                n_particles=n_particles,
+                particle_type=particle_type,
+                rng=rng,
+                auto_cache=auto_cache,
+                cache_dir=cache_dir,
+            )
+            occupations = padded
+        else:
+            resolved_m = system.spec.m_ext
+            n_particles = system.spec.n_particles
+            occupations = []
+            for occ in parsed_occupations:
+                if len(occ) > resolved_m:
+                    raise ValueError("Occupation term length exceeds provided system.m_ext.")
+                occ_pad = occ + (0,) * (resolved_m - len(occ))
+                if sum(occ_pad) != n_particles:
+                    raise ValueError(
+                        f"Occupation total {sum(occ_pad)} does not match provided system n_particles={n_particles}."
+                    )
+                occupations.append(occ_pad)
+
+        return system.state.from_fock_mixture(
+            occupations=occupations,
+            weights=parsed_weights,
+            label=label,
+            normalize=normalize,
+        )
+
+    @classmethod
+    def from_fock_density(
+        cls,
+        rho_fock: ArrayLike,
+        *,
+        m_ext: Optional[int] = None,
+        n_particles: Optional[int] = None,
+        particle_type: str = "boson",
+        rng: Optional[np.random.Generator] = None,
+        label: Optional[str] = None,
+        system: Optional["PhotonicSystem"] = None,
+        auto_cache: Optional[bool] = None,
+        cache_dir: Optional[str] = None,
+    ) -> "PhotonicState":
+        """State-first constructor from a Fock-basis density matrix."""
+        arr = np.asarray(rho_fock, dtype=complex)
+        if arr.ndim != 2 or arr.shape[0] != arr.shape[1]:
+            raise ValueError("rho_fock must be a square matrix.")
+
+        if system is None:
+            if m_ext is None or n_particles is None:
+                raise ValueError(
+                    "When system is not provided, from_fock_density requires both m_ext and n_particles."
+                )
+            from ..system import PhotonicSystem
+
+            system = PhotonicSystem(
+                m_ext=int(m_ext),
+                n_particles=int(n_particles),
+                particle_type=particle_type,
+                rng=rng,
+                auto_cache=auto_cache,
+                cache_dir=cache_dir,
+            )
+
+        return system.state.from_fock_density(arr, label=label)
+
     def _tensor_matrix(self) -> np.ndarray:
         if "tensor" not in self._cache:
             if "fock" not in self._cache:
@@ -361,6 +686,8 @@ class PhotonicState:
     def _schur_matrix(self) -> np.ndarray:
         if "schur" not in self._cache:
             self._cache["schur"] = self.system.decomposition.to_schur_operator(self._tensor_matrix())
+            self.system._mark_schur_cache_dirty()
+            self.system._auto_save_schur_cache_if_needed()
         return self._cache["schur"]
 
     def has_rep(self, rep: str) -> bool:
@@ -397,6 +724,185 @@ class PhotonicState:
         """Return deep-copied state and representation cache."""
         cloned_cache = {k: v.copy() for k, v in self._cache.items()}
         return PhotonicState(system=self.system, data=None, label=self.label, _cache=cloned_cache)
+
+    @staticmethod
+    def _spec_signature(state: "PhotonicState") -> Tuple[int, int, str]:
+        spec = state.system.spec
+        return (int(spec.m_ext), int(spec.n_particles), str(spec.particle_type))
+
+    def _assert_compatible(self, other: "PhotonicState") -> None:
+        if not isinstance(other, PhotonicState):
+            raise TypeError("Expected `other` to be a PhotonicState.")
+        lhs = PhotonicState._spec_signature(self)
+        rhs = PhotonicState._spec_signature(other)
+        if lhs != rhs:
+            raise ValueError(
+                "State mismatch: both states must share (m_ext, n_particles, particle_type). "
+                f"Got {lhs} vs {rhs}."
+            )
+
+    @staticmethod
+    def _pure_ket_from_density(rho: np.ndarray, tol: float = 1e-8) -> np.ndarray:
+        rho_h = 0.5 * (rho + rho.conj().T)
+        tr = complex(np.trace(rho_h))
+        if abs(tr) <= tol:
+            raise ValueError("Cannot extract a ket from a near-zero-trace operator.")
+        rho_n = rho_h / tr
+        evals, evecs = np.linalg.eigh(rho_n)
+        idx = int(np.argmax(np.real(evals)))
+        lam_max = float(np.real(evals[idx]))
+        purity = float(np.real(np.trace(rho_n @ rho_n)))
+        if abs(lam_max - 1.0) > 10.0 * tol or abs(purity - 1.0) > 10.0 * tol:
+            raise ValueError(
+                "Coherent superposition requires pure input states. "
+                "At least one input is mixed within tolerance."
+            )
+        ket = evecs[:, idx]
+        norm = np.linalg.norm(ket)
+        if norm <= tol:
+            raise ValueError("Extracted ket has near-zero norm.")
+        ket = ket / norm
+
+        # Deterministic gauge: first significant component is made real-positive.
+        nz = np.flatnonzero(np.abs(ket) > tol)
+        if nz.size > 0:
+            ket = ket * np.exp(-1j * np.angle(ket[int(nz[0])]))
+        return ket
+
+    @classmethod
+    def mixture(
+        cls,
+        *terms,
+        normalize: bool = True,
+        label: Optional[str] = None,
+        system: Optional["PhotonicSystem"] = None,
+    ) -> "PhotonicState":
+        """Build classical mixture from arbitrary states.
+
+        Parameters
+        ----------
+        terms:
+            Mixture terms as ``(weight, state)``.
+        normalize:
+            If ``True`` (default), normalize to unit trace.
+        label:
+            Optional output label.
+        system:
+            Optional target system context. If omitted, uses the first state's
+            system. All states must be spec-compatible with this system.
+        """
+        if len(terms) == 0:
+            raise ValueError("mixture requires at least one term.")
+
+        parsed: List[Tuple[float, PhotonicState]] = []
+        for term in terms:
+            if not isinstance(term, (tuple, list)) or len(term) != 2:
+                raise ValueError("Each mixture term must be a pair (weight, state).")
+            w = float(term[0])
+            s = term[1]
+            if not isinstance(s, PhotonicState):
+                raise TypeError("Each mixture term must provide a PhotonicState as second entry.")
+            if w < 0:
+                raise ValueError("Mixture weights must be nonnegative.")
+            parsed.append((w, s))
+
+        if system is None:
+            system = parsed[0][1].system
+
+        sig_target = (
+            int(system.spec.m_ext),
+            int(system.spec.n_particles),
+            str(system.spec.particle_type),
+        )
+        for _, s in parsed:
+            sig = PhotonicState._spec_signature(s)
+            if sig != sig_target:
+                raise ValueError(
+                    "State/system mismatch in mixture: expected "
+                    f"{sig_target}, got {sig}."
+                )
+
+        total_w = float(sum(w for w, _ in parsed))
+        if total_w <= 0:
+            raise ValueError("At least one mixture weight must be strictly positive.")
+
+        use_fock = system.fock_space is not None and all(s.has_rep("fock") for _, s in parsed)
+        if use_fock:
+            assert system.fock_space is not None
+            rho = np.zeros((system.fock_space.dim, system.fock_space.dim), dtype=complex)
+            for w, s in parsed:
+                rho += w * s.density_matrix(rep="fock", copy=False)
+            rho = 0.5 * (rho + rho.conj().T)
+            if normalize:
+                rho = normalize_density(rho)
+            return PhotonicState(system=system, data=None, label=label, _cache={"fock": rho})
+
+        rho_t = np.zeros((system.hilbert_dim, system.hilbert_dim), dtype=complex)
+        for w, s in parsed:
+            rho_t += w * s.density_matrix(rep="tensor", copy=False)
+        rho_t = 0.5 * (rho_t + rho_t.conj().T)
+        if normalize:
+            rho_t = normalize_density(rho_t)
+        return PhotonicState(system=system, data=rho_t, label=label, _cache={"tensor": rho_t})
+
+    def mix(
+        self,
+        other: "PhotonicState",
+        weight: float = 0.5,
+        normalize: bool = True,
+        label: Optional[str] = None,
+    ) -> "PhotonicState":
+        """Return classical mixture ``weight*self + (1-weight)*other``."""
+        self._assert_compatible(other)
+        w = float(weight)
+        if w < 0 or w > 1:
+            raise ValueError("weight must be in [0, 1].")
+        return PhotonicState.mixture(
+            (w, self),
+            (1.0 - w, other),
+            normalize=normalize,
+            label=label,
+            system=self.system,
+        )
+
+    def superpose(
+        self,
+        other: "PhotonicState",
+        alpha: complex = 1.0,
+        beta: complex = 1.0,
+        normalize: bool = True,
+        label: Optional[str] = None,
+        tol: float = 1e-8,
+    ) -> "PhotonicState":
+        """Return coherent superposition of two pure states.
+
+        Notes
+        -----
+        This operation is only defined here for pure-state inputs. For mixed
+        states, use :meth:`mix` / :meth:`mixture` instead.
+        """
+        self._assert_compatible(other)
+        use_fock = self.has_rep("fock") and other.has_rep("fock")
+        rep = "fock" if use_fock else "tensor"
+
+        ket_a = PhotonicState._pure_ket_from_density(self.density_matrix(rep=rep, copy=False), tol=tol)
+        ket_b = PhotonicState._pure_ket_from_density(other.density_matrix(rep=rep, copy=False), tol=tol)
+        psi = complex(alpha) * ket_a + complex(beta) * ket_b
+        norm_sq = float(np.real(np.vdot(psi, psi)))
+        if norm_sq <= tol:
+            raise ValueError("Superposition coefficients produce a near-zero state vector.")
+        if normalize:
+            psi = psi / np.sqrt(norm_sq)
+        rho = np.outer(psi, psi.conj())
+
+        if label is None:
+            la = self.label or "state_a"
+            lb = other.label or "state_b"
+            label = f"superpose({la}, {lb})"
+
+        if use_fock:
+            return PhotonicState(system=self.system, data=None, label=label, _cache={"fock": rho})
+        return PhotonicState(system=self.system, data=rho, label=label, _cache={"tensor": rho})
 
     def evolve(self, S: ArrayLike) -> "PhotonicState":
         """Evolve state by single-particle unitary ``S``.
@@ -658,3 +1164,166 @@ def gram_description(gram: GramInput) -> str:
 def as_normalized_density(rho: ArrayLike) -> np.ndarray:
     """Convert user input into normalized density matrix array."""
     return normalize_density(np.asarray(rho, dtype=complex))
+
+
+def from_modes_and_gram(
+    ext_modes: Sequence[int],
+    gram: GramInput = "indistinguishable",
+    *,
+    m_ext: Optional[int] = None,
+    particle_type: str = "boson",
+    rng: Optional[np.random.Generator] = None,
+    label: Optional[str] = None,
+    system: Optional["PhotonicSystem"] = None,
+    auto_cache: Optional[bool] = None,
+    cache_dir: Optional[str] = None,
+) -> PhotonicState:
+    """State-first constructor shortcut.
+
+    This is a top-level functional alias of
+    :meth:`PhotonicState.from_modes_and_gram`.
+    """
+    return PhotonicState.from_modes_and_gram(
+        ext_modes=ext_modes,
+        gram=gram,
+        m_ext=m_ext,
+        particle_type=particle_type,
+        rng=rng,
+        label=label,
+        system=system,
+        auto_cache=auto_cache,
+        cache_dir=cache_dir,
+    )
+
+
+def from_occupation(
+    occupation: Sequence[int],
+    *,
+    label: Optional[str] = None,
+    system: Optional["PhotonicSystem"] = None,
+    particle_type: str = "boson",
+    rng: Optional[np.random.Generator] = None,
+    auto_cache: Optional[bool] = None,
+    cache_dir: Optional[str] = None,
+) -> PhotonicState:
+    """State-first Fock occupation shortcut.
+
+    This is a top-level functional alias of
+    :meth:`PhotonicState.from_occupation`.
+    """
+    return PhotonicState.from_occupation(
+        occupation=occupation,
+        label=label,
+        system=system,
+        particle_type=particle_type,
+        rng=rng,
+        auto_cache=auto_cache,
+        cache_dir=cache_dir,
+    )
+
+
+def Fock(
+    *occupation: int,
+    label: Optional[str] = None,
+    system: Optional["PhotonicSystem"] = None,
+    particle_type: str = "boson",
+    rng: Optional[np.random.Generator] = None,
+    auto_cache: Optional[bool] = None,
+    cache_dir: Optional[str] = None,
+) -> PhotonicState:
+    """Build a bosonic Fock state directly as ``rho = Fock(n0, n1, ...)``."""
+    return PhotonicState.Fock(
+        *occupation,
+        label=label,
+        system=system,
+        particle_type=particle_type,
+        rng=rng,
+        auto_cache=auto_cache,
+        cache_dir=cache_dir,
+    )
+
+
+def FockMixed(
+    *terms,
+    label: Optional[str] = None,
+    system: Optional["PhotonicSystem"] = None,
+    m_ext: Optional[int] = None,
+    particle_type: str = "boson",
+    rng: Optional[np.random.Generator] = None,
+    auto_cache: Optional[bool] = None,
+    cache_dir: Optional[str] = None,
+    normalize: bool = True,
+) -> PhotonicState:
+    """Build a classical mixture of Fock states as a top-level shortcut."""
+    return PhotonicState.FockMixed(
+        *terms,
+        label=label,
+        system=system,
+        m_ext=m_ext,
+        particle_type=particle_type,
+        rng=rng,
+        auto_cache=auto_cache,
+        cache_dir=cache_dir,
+        normalize=normalize,
+    )
+
+
+def from_fock_density(
+    rho_fock: ArrayLike,
+    *,
+    m_ext: Optional[int] = None,
+    n_particles: Optional[int] = None,
+    particle_type: str = "boson",
+    rng: Optional[np.random.Generator] = None,
+    label: Optional[str] = None,
+    system: Optional["PhotonicSystem"] = None,
+    auto_cache: Optional[bool] = None,
+    cache_dir: Optional[str] = None,
+) -> PhotonicState:
+    """Wrap a Fock-basis density matrix as a :class:`PhotonicState`."""
+    return PhotonicState.from_fock_density(
+        rho_fock=rho_fock,
+        m_ext=m_ext,
+        n_particles=n_particles,
+        particle_type=particle_type,
+        rng=rng,
+        label=label,
+        system=system,
+        auto_cache=auto_cache,
+        cache_dir=cache_dir,
+    )
+
+
+def mix_states(
+    *terms,
+    normalize: bool = True,
+    label: Optional[str] = None,
+    system: Optional["PhotonicSystem"] = None,
+) -> PhotonicState:
+    """Functional alias of :meth:`PhotonicState.mixture`."""
+    return PhotonicState.mixture(
+        *terms,
+        normalize=normalize,
+        label=label,
+        system=system,
+    )
+
+
+def superpose(
+    state_a: PhotonicState,
+    state_b: PhotonicState,
+    alpha: complex = 1.0,
+    beta: complex = 1.0,
+    normalize: bool = True,
+    label: Optional[str] = None,
+    tol: float = 1e-8,
+) -> PhotonicState:
+    """Functional alias of :meth:`PhotonicState.superpose`."""
+    return state_a.superpose(
+        state_b,
+        alpha=alpha,
+        beta=beta,
+        normalize=normalize,
+        label=label,
+        tol=tol,
+    )

@@ -81,12 +81,11 @@ class PhotonicSystem:
         else:
             self.cache_dir = Path(cache_dir).expanduser()
         self._fock_cache_dirty = False
+        self._schur_cache_dirty = False
+        self._schur_cache_loaded = False
         self._cache_io_in_progress = False
 
-        try:
-            self._projectors = SymmetricGroupProjectors(self.space)
-        except NotImplementedError:
-            self._projectors = None
+        self._projectors = SymmetricGroupProjectors(self.space)
 
         self._decomposition: Optional[SchurWeylDecomposition] = None
         self._scoped_filtrations: Dict[Tuple[Union[str, Partition], ...], JordanFiltration] = {}
@@ -99,6 +98,7 @@ class PhotonicSystem:
         if self.auto_cache:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             self._try_auto_load_fock_cache()
+            self._try_auto_load_schur_cache()
 
     @property
     def hilbert_dim(self) -> int:
@@ -134,6 +134,14 @@ class PhotonicSystem:
         )
         return self.cache_dir / filename
 
+    def default_schur_cache_path(self) -> Path:
+        """Return canonical Schur cache path for current model."""
+        filename = (
+            f"schur_cache_v1_{self.spec.particle_type}_"
+            f"m{self.spec.m_ext}_n{self.spec.n_particles}.npz"
+        )
+        return self.cache_dir / filename
+
     @property
     def invariants_engine(self) -> InvariantEngine:
         """Return invariant diagnostic helper bound to global filtration."""
@@ -144,7 +152,7 @@ class PhotonicSystem:
 
     @property
     def projectors(self) -> Optional[SymmetricGroupProjectors]:
-        """Return symmetric-group projector helper (or ``None`` outside demo scope)."""
+        """Return symmetric-group projector helper."""
         return self._projectors
 
     @property
@@ -157,7 +165,7 @@ class PhotonicSystem:
             Decomposition object exposing sector and multiplicity projectors.
         """
         if self._projectors is None:
-            raise NotImplementedError("Schur decomposition is currently demo-supported for n=2,3 only.")
+            raise NotImplementedError("Schur decomposition helper is unavailable for this system.")
         if self._decomposition is None:
             self._decomposition = SchurWeylDecomposition(self.space, self._projectors)
         return self._decomposition
@@ -182,6 +190,10 @@ class PhotonicSystem:
     def _mark_fock_cache_dirty(self) -> None:
         if self.auto_cache:
             self._fock_cache_dirty = True
+
+    def _mark_schur_cache_dirty(self) -> None:
+        if self.auto_cache:
+            self._schur_cache_dirty = True
 
     def _try_auto_load_fock_cache(self) -> None:
         if not self.auto_cache or self._fock_space is None:
@@ -216,6 +228,44 @@ class PhotonicSystem:
             self._cache_io_in_progress = True
             self.save_fock_cache(path, max_order=None, include_generators=True)
             self._fock_cache_dirty = False
+        finally:
+            self._cache_io_in_progress = False
+
+    def _try_auto_load_schur_cache(self) -> None:
+        if not self.auto_cache:
+            return
+        path = self.default_schur_cache_path()
+        if not path.exists():
+            return
+        try:
+            self._cache_io_in_progress = True
+            self.load_schur_cache(path, load_multiplicity=True)
+            self._schur_cache_dirty = False
+            self._schur_cache_loaded = True
+        except Exception as exc:
+            warnings.warn(
+                f"Failed to load schur cache from '{path}': {exc}. Will rebuild cache lazily.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        finally:
+            self._cache_io_in_progress = False
+
+    def _auto_save_schur_cache_if_needed(self, force: bool = False) -> None:
+        if (
+            not self.auto_cache
+            or self._cache_io_in_progress
+            or (not force and not self._schur_cache_dirty)
+        ):
+            return
+        if self._decomposition is None or self._decomposition._W is None:
+            return
+        path = self.default_schur_cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._cache_io_in_progress = True
+            self.save_schur_cache(path, include_multiplicity=True)
+            self._schur_cache_dirty = False
         finally:
             self._cache_io_in_progress = False
 
@@ -410,6 +460,146 @@ class PhotonicSystem:
                     self._fock_built_order = built_order
         self._fock_cache_dirty = False
 
+    def save_schur_cache(
+        self,
+        path: Union[str, Path],
+        include_multiplicity: bool = True,
+    ) -> None:
+        """Persist Schur decomposition cache to disk.
+
+        Parameters
+        ----------
+        path:
+            Output ``.npz`` file path.
+        include_multiplicity:
+            If ``True``, include already-built multiplicity projectors.
+        """
+        path = Path(path).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        old_io_flag = self._cache_io_in_progress
+        self._cache_io_in_progress = True
+        try:
+            decomp = self.decomposition
+            W = decomp.schur_transform()
+            partitions = decomp.partitions()
+
+            starts = np.array([decomp.block_slice(lam).start for lam in partitions], dtype=np.int64)
+            stops = np.array([decomp.block_slice(lam).stop for lam in partitions], dtype=np.int64)
+
+            meta = {
+                "format": "photonic_jordan_schur_cache",
+                "version": 1,
+                "m_ext": int(self.spec.m_ext),
+                "n_particles": int(self.spec.n_particles),
+                "particle_type": self.spec.particle_type,
+            }
+            arrays: Dict[str, np.ndarray] = {
+                "meta": np.array(json.dumps(meta)),
+                "partitions": np.array(json.dumps([list(lam) for lam in partitions])),
+                "starts": starts,
+                "stops": stops,
+                "W": np.asarray(W, dtype=complex),
+            }
+
+            for idx, lam in enumerate(partitions):
+                arrays[f"Q_{idx}"] = np.asarray(decomp.sector_projector(lam), dtype=complex)
+
+            if include_multiplicity:
+                arrays["has_multiplicity"] = np.array(1, dtype=np.int64)
+                for idx, lam in enumerate(partitions):
+                    fam = decomp._multiplicity_projectors.get(lam)
+                    count = 0 if fam is None else len(fam)
+                    arrays[f"mult_count_{idx}"] = np.array(count, dtype=np.int64)
+                    if fam is not None:
+                        for a, Qa in enumerate(fam):
+                            arrays[f"M_{idx}_{a}"] = np.asarray(Qa, dtype=complex)
+            else:
+                arrays["has_multiplicity"] = np.array(0, dtype=np.int64)
+
+            np.savez_compressed(path, **arrays)
+        finally:
+            self._cache_io_in_progress = old_io_flag
+        self._schur_cache_dirty = False
+
+    def load_schur_cache(
+        self,
+        path: Union[str, Path],
+        load_multiplicity: bool = True,
+    ) -> None:
+        """Load Schur decomposition cache produced by :meth:`save_schur_cache`.
+
+        Parameters
+        ----------
+        path:
+            Input ``.npz`` checkpoint path.
+        load_multiplicity:
+            If ``True``, restore cached multiplicity projectors when present.
+        """
+        path = Path(path).expanduser()
+        with np.load(path, allow_pickle=False) as data:
+            if "meta" not in data:
+                raise ValueError("Invalid schur cache file: missing metadata.")
+            meta = json.loads(str(data["meta"].item()))
+            if meta.get("format") != "photonic_jordan_schur_cache":
+                raise ValueError("Invalid schur cache format marker.")
+            if int(meta.get("m_ext", -1)) != self.spec.m_ext or int(meta.get("n_particles", -1)) != self.spec.n_particles:
+                raise ValueError(
+                    "Cache model mismatch: "
+                    f"file has (m_ext={meta.get('m_ext')}, n_particles={meta.get('n_particles')}), "
+                    f"system has (m_ext={self.spec.m_ext}, n_particles={self.spec.n_particles})."
+                )
+
+            if "partitions" not in data or "starts" not in data or "stops" not in data or "W" not in data:
+                raise ValueError("Invalid schur cache file: missing required decomposition arrays.")
+
+            partitions_raw = json.loads(str(data["partitions"].item()))
+            partitions = [tuple(int(x) for x in lam) for lam in partitions_raw]
+            starts = np.asarray(data["starts"], dtype=np.int64)
+            stops = np.asarray(data["stops"], dtype=np.int64)
+            W = np.asarray(data["W"], dtype=complex)
+
+            decomp = SchurWeylDecomposition(self.space, self._projectors)  # type: ignore[arg-type]
+            decomp._partitions = partitions
+            decomp._W = W
+            decomp._sector_projectors = {}
+            decomp._sector_bases = {}
+            decomp._block_slices = {}
+            decomp._multiplicity_projectors = {}
+
+            for idx, lam in enumerate(partitions):
+                start = int(starts[idx])
+                stop = int(stops[idx])
+                sl = slice(start, stop)
+                decomp._block_slices[lam] = sl
+                basis = W[:, sl]
+                decomp._sector_bases[lam] = basis
+
+                key_q = f"Q_{idx}"
+                if key_q in data:
+                    Q = np.asarray(data[key_q], dtype=complex)
+                else:
+                    Q = safe_matmul(basis, basis.conj().T) if basis.size else np.zeros((self.hilbert_dim, self.hilbert_dim), dtype=complex)
+                decomp._sector_projectors[lam] = Q
+
+                if load_multiplicity and int(data.get("has_multiplicity", np.array(0))) == 1:
+                    key_count = f"mult_count_{idx}"
+                    if key_count in data:
+                        count = int(np.asarray(data[key_count]).item())
+                        if count > 0:
+                            fam = []
+                            for a in range(count):
+                                key_m = f"M_{idx}_{a}"
+                                if key_m not in data:
+                                    raise ValueError(f"Invalid schur cache: missing multiplicity projector '{key_m}'.")
+                                fam.append(np.asarray(data[key_m], dtype=complex))
+                            decomp._multiplicity_projectors[lam] = tuple(fam)
+
+            self._decomposition = decomp
+
+        self._schur_cache_dirty = False
+        self._schur_cache_loaded = True
+
     @staticmethod
     def _resolve_multiplicity_arg(
         multiplicity: Optional[MultiplicityLabel],
@@ -539,7 +729,7 @@ class PhotonicSystem:
         return self._scoped_filtrations[key]
 
     def available_partitions(self):
-        """Return available Schur partitions in current demo scope."""
+        """Return available Schur partitions for current ``(m_ext, n_particles)``."""
         if self._projectors is None:
             return []
         return self.decomposition.partitions()
@@ -547,14 +737,20 @@ class PhotonicSystem:
     def sector_projector(self, lam: Partition) -> np.ndarray:
         """Return Schur sector projector ``Q_lambda``."""
         if self._projectors is None:
-            raise NotImplementedError("Sector projectors are only implemented for n=2,3 in this demo.")
-        return self.decomposition.sector_projector(lam)
+            raise NotImplementedError("Sector projectors are unavailable for this system.")
+        Q = self.decomposition.sector_projector(lam)
+        self._mark_schur_cache_dirty()
+        self._auto_save_schur_cache_if_needed()
+        return Q
 
     def multiplicity_projector(self, lam: Partition, a: int) -> np.ndarray:
         """Return multiplicity-local projector ``Q_{lambda,a}``."""
         if self._projectors is None:
-            raise NotImplementedError("Multiplicity projectors are only implemented for n=2,3 in this demo.")
-        return self.decomposition.multiplicity_projector(lam, a)
+            raise NotImplementedError("Multiplicity projectors are unavailable for this system.")
+        Qa = self.decomposition.multiplicity_projector(lam, a)
+        self._mark_schur_cache_dirty()
+        self._auto_save_schur_cache_if_needed()
+        return Qa
 
     # Backward-compatible alias.
     def copy_projector(self, lam: Partition, a: int) -> np.ndarray:

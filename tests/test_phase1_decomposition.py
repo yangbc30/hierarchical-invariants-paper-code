@@ -97,3 +97,22 @@ def test_state_representation_access_blocks_and_commutant_sampling():
     for perm in permutations(range(sys.spec.n_particles)):
         P = sys.projectors.permutation_matrix(perm)
         assert la.norm(_safe_matmul(P, rho_comm.matrix) - _safe_matmul(rho_comm.matrix, P)) < 1e-8
+
+
+def test_schur_projectors_support_n4_and_known_symmetric_group_dims():
+    sys = PhotonicSystem(m_ext=2, n_particles=4, rng=np.random.default_rng(4))
+    decomp = sys.decomposition
+
+    assert decomp.partitions() == [(4,), (3, 1), (2, 2)]
+    assert decomp.dim_mult((4,)) == 1
+    assert decomp.dim_mult((3, 1)) == 3
+    assert decomp.dim_mult((2, 2)) == 2
+
+    dim = sys.hilbert_dim
+    total = np.zeros((dim, dim), dtype=complex)
+    for lam in decomp.partitions():
+        Q = decomp.sector_projector(lam)
+        assert np.allclose(Q, Q.conj().T, atol=1e-8)
+        assert np.allclose(_safe_matmul(Q, Q), Q, atol=1e-8)
+        total += Q
+    assert np.allclose(total, np.eye(dim), atol=1e-8)

@@ -24,6 +24,8 @@ Useful Fock backend helpers on system:
 - `PhotonicSystem.evolve_density_fock`
 - `PhotonicSystem.save_fock_cache`
 - `PhotonicSystem.load_fock_cache`
+- `PhotonicSystem.save_schur_cache`
+- `PhotonicSystem.load_schur_cache`
 
 ## State Layer
 
@@ -35,7 +37,20 @@ Useful Fock backend helpers on system:
 
 Common methods:
 
+- `from_modes_and_gram` (functional state-first entry)
+- `Fock` / `from_occupation` (functional Fock entries)
+- `FockMixed` (functional Fock mixed-state entry)
+- `from_fock_density` (functional arbitrary Fock density entry)
 - `StateBuilder.from_modes_and_gram`
+- `StateBuilder.from_fock`
+- `StateBuilder.from_fock_mixture`
+- `StateBuilder.from_fock_density`
+- `PhotonicState.from_modes_and_gram` (state-first entry)
+- `PhotonicState.from_occupation` / `PhotonicState.Fock` (state-first Fock entry)
+- `PhotonicState.FockMixed` (state-first Fock mixed-state entry)
+- `PhotonicState.from_fock_density` (state-first arbitrary Fock density entry)
+- `PhotonicState.mix` / `PhotonicState.mixture` (classical mixtures between states)
+- `PhotonicState.superpose` (coherent superposition for pure states)
 - `PhotonicState.density_matrix`
 - `PhotonicState.project_jordan`
 - `StateInvariantView.I_exact`
