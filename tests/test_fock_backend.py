@@ -126,6 +126,58 @@ def test_state_builder_from_fock_mixture():
     assert abs(float(np.real(rho_f[i2, i2])) - 0.75) < 1e-12
 
 
+def test_pattern_distribution_normalizes_for_partial_distinguishability_state():
+    sys = PhotonicSystem(m_ext=2, n_particles=2, rng=np.random.default_rng(217), auto_cache=False)
+    rho = sys.state.from_modes_and_gram([0, 1], gram=0.8)
+
+    dist = rho.pattern_distribution()
+    assert abs(sum(dist.values()) - 1.0) < 1e-12
+    assert abs(dist[(1, 1)] - 1.0) < 1e-12
+    assert abs(dist[(2, 0)]) < 1e-12
+    assert abs(dist[(0, 2)]) < 1e-12
+
+
+def test_pattern_probability_matches_hom_formula_after_balanced_beamsplitter():
+    sys = PhotonicSystem(m_ext=2, n_particles=2, rng=np.random.default_rng(218), auto_cache=False)
+    gamma = 0.8
+    rho = sys.state.from_modes_and_gram([0, 1], gram=gamma)
+    S = np.array([[1.0, 1.0], [1.0, -1.0]], dtype=complex) / np.sqrt(2.0)
+
+    rho_out = rho.evolve(S)
+
+    p11 = rho_out.pattern_probability((1, 1))
+    p20 = rho_out.pattern_probability((2, 0))
+    p02 = rho_out.pattern_probability((0, 2))
+
+    expected_coin = (1.0 - abs(gamma) ** 2) / 2.0
+    expected_bunch = (1.0 + abs(gamma) ** 2) / 4.0
+
+    assert abs(p11 - expected_coin) < 1e-10
+    assert abs(p20 - expected_bunch) < 1e-10
+    assert abs(p02 - expected_bunch) < 1e-10
+    assert abs(p11 + p20 + p02 - 1.0) < 1e-10
+
+
+def test_pattern_probability_fock_path_matches_tensor_reference():
+    sys = PhotonicSystem(m_ext=3, n_particles=3, rng=np.random.default_rng(219), auto_cache=False)
+    ext = [0, 1, 0]
+    S = sys.unitary.haar(seed=31)
+
+    rho_fast = sys.state.from_modes_and_gram(ext, gram=1)
+    rho_ref_tensor = sys._state_factory.from_external_modes_and_gram(ext_modes=ext, gram=np.ones((3, 3), dtype=complex))
+    rho_ref = sys.state.from_density_matrix(rho_ref_tensor)
+
+    out_fast = rho_fast.evolve(S)
+    out_ref = rho_ref.evolve(S)
+
+    fs = sys.fock_space
+    assert fs is not None
+    for occ in fs.basis_states:
+        p_fast = out_fast.pattern_probability(occ)
+        p_ref = out_ref.pattern_probability(occ)
+        assert abs(p_fast - p_ref) < 1e-10
+
+
 def test_save_load_fock_cache_roundtrip(tmp_path):
     path = tmp_path / "fock_cache_m2_n3.npz"
 

@@ -720,6 +720,58 @@ class PhotonicState:
             raise ValueError("rep must be one of {'tensor', 'fock', 'schur'} in the current implementation.")
         return out.copy() if copy else out
 
+    def pattern_probability(self, occupation: Sequence[int]) -> float:
+        """Return output-detection probability for occupation pattern ``(n_0,...,n_{m-1})``.
+
+        Parameters
+        ----------
+        occupation:
+            Output pattern over external modes.
+
+        Returns
+        -------
+        float
+            Probability ``Tr(rho Pi_occ)`` where ``Pi_occ`` projects onto the
+            subspace of labeled external basis states with the given occupation.
+
+        Notes
+        -----
+        This models number-resolving detection that resolves external modes but
+        not particle labels or internal states.
+        """
+        if self.has_rep("fock"):
+            fs = self.system.fock_space
+            if fs is None:
+                raise RuntimeError("State has fock cache but system has no fock backend.")
+            idx = fs.index_from_occupation(occupation)
+            rho_f = self._fock_matrix()
+            return float(np.real(rho_f[idx, idx]))
+
+        indices = self.system.space.indices_for_occupation(occupation)
+        rho_t = self._tensor_matrix()
+        diag = np.diagonal(rho_t)
+        return float(np.real(np.sum(diag[indices])))
+
+    def pattern_distribution(self) -> Dict[Tuple[int, ...], float]:
+        """Return all occupation-pattern probabilities as a dictionary."""
+        if self.has_rep("fock"):
+            fs = self.system.fock_space
+            if fs is None:
+                raise RuntimeError("State has fock cache but system has no fock backend.")
+            rho_f = self._fock_matrix()
+            diag = np.real(np.diagonal(rho_f))
+            return {
+                occ: float(diag[idx])
+                for idx, occ in enumerate(fs.basis_states)
+            }
+
+        rho_t = self._tensor_matrix()
+        diag = np.real(np.diagonal(rho_t))
+        return {
+            occ: float(np.sum(diag[indices]))
+            for occ, indices in self.system.space.occupation_to_indices().items()
+        }
+
     def copy(self) -> "PhotonicState":
         """Return deep-copied state and representation cache."""
         cloned_cache = {k: v.copy() for k, v in self._cache.items()}

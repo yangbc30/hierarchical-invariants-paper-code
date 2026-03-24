@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from itertools import product
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -31,9 +31,52 @@ class LabeledTensorSpace:
         self.basis_array = np.asarray(self.basis_states, dtype=int)
         self.index_weights = (self.m ** np.arange(self.n - 1, -1, -1)).astype(int)
         self.state_to_index = {state: idx for idx, state in enumerate(self.basis_states)}
+        self._occupation_to_indices_cache: Optional[Dict[Tuple[int, ...], np.ndarray]] = None
 
         self._single_ops_cache: Optional[Dict[Tuple[int, int], np.ndarray]] = None
         self._generators_cache: Optional[Dict[Tuple[int, int], np.ndarray]] = None
+
+    def validate_occupation(self, occupation: Sequence[int]) -> Tuple[int, ...]:
+        """Validate and return occupation tuple ``(n_0,...,n_{m-1})``."""
+        occ = tuple(int(x) for x in occupation)
+        if len(occ) != self.m:
+            raise ValueError(f"Occupation must have length m_ext={self.m}.")
+        if any(x < 0 for x in occ):
+            raise ValueError("Occupation entries must be nonnegative.")
+        if sum(occ) != self.n:
+            raise ValueError(
+                f"Occupation total must equal n_particles={self.n}, got {sum(occ)}."
+            )
+        return occ
+
+    def occupation_from_modes(self, ext_modes: Sequence[int]) -> Tuple[int, ...]:
+        """Return occupation tuple from a labeled mode assignment."""
+        if len(ext_modes) != self.n:
+            raise ValueError("Length of ext_modes must equal n_particles.")
+        occ = [0] * self.m
+        for mode in ext_modes:
+            idx = int(mode)
+            if idx < 0 or idx >= self.m:
+                raise ValueError("Mode index out of range.")
+            occ[idx] += 1
+        return tuple(occ)
+
+    def occupation_to_indices(self) -> Dict[Tuple[int, ...], np.ndarray]:
+        """Return cached map from occupation tuple to tensor-basis indices."""
+        if self._occupation_to_indices_cache is None:
+            mapping: Dict[Tuple[int, ...], list[int]] = {}
+            for idx, state in enumerate(self.basis_states):
+                occ = self.occupation_from_modes(state)
+                mapping.setdefault(occ, []).append(idx)
+            self._occupation_to_indices_cache = {
+                occ: np.asarray(indices, dtype=int) for occ, indices in mapping.items()
+            }
+        return self._occupation_to_indices_cache
+
+    def indices_for_occupation(self, occupation: Sequence[int]) -> np.ndarray:
+        """Return tensor-basis indices whose labeled states realize ``occupation``."""
+        occ = self.validate_occupation(occupation)
+        return self.occupation_to_indices()[occ]
 
     @property
     def single_ops(self) -> Dict[Tuple[int, int], np.ndarray]:

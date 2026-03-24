@@ -116,3 +116,33 @@ def test_schur_projectors_support_n4_and_known_symmetric_group_dims():
         assert np.allclose(_safe_matmul(Q, Q), Q, atol=1e-8)
         total += Q
     assert np.allclose(total, np.eye(dim), atol=1e-8)
+
+
+def test_schur_weyl_dimensions_for_three_photons_two_modes():
+    sys = PhotonicSystem(m_ext=2, n_particles=3, rng=np.random.default_rng(5), auto_cache=False)
+    decomp = sys.decomposition
+
+    assert decomp.partitions() == [(3,), (2, 1)]
+    assert decomp.dim_mult((3,)) == 1
+    assert decomp.dim_mult((2, 1)) == 2
+    assert decomp.dim_U((3,)) == 4
+    assert decomp.dim_U((2, 1)) == 2
+
+    total = sum(decomp.dim_total(lam) for lam in decomp.partitions())
+    assert total == sys.hilbert_dim
+
+
+def test_schur_weyl_dimensions_for_three_photons_three_modes():
+    sys = PhotonicSystem(m_ext=3, n_particles=3, rng=np.random.default_rng(6), auto_cache=False)
+    decomp = sys.decomposition
+
+    assert decomp.partitions() == [(3,), (2, 1), (1, 1, 1)]
+    assert decomp.dim_mult((3,)) == 1
+    assert decomp.dim_mult((2, 1)) == 2
+    assert decomp.dim_mult((1, 1, 1)) == 1
+    assert decomp.dim_U((3,)) == 10
+    assert decomp.dim_U((2, 1)) == 8
+    assert decomp.dim_U((1, 1, 1)) == 1
+
+    total = sum(decomp.dim_total(lam) for lam in decomp.partitions())
+    assert total == sys.hilbert_dim

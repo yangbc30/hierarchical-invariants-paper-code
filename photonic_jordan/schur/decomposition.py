@@ -26,6 +26,10 @@ class SchurWeylDecomposition:
     This implementation chooses multiplicity labels deterministically by a
     stable-seeded commutant diagonalization.
 
+    For the special case ``(m_ext=2, n_particles=3)``, the Schur basis is
+    replaced by an explicit Young-type symmetry-adapted basis so that
+    literature examples can be compared entrywise in Schur representation.
+
     References
     ----------
     - W. Fulton and J. Harris, *Representation Theory: A First Course*
@@ -47,8 +51,57 @@ class SchurWeylDecomposition:
         """Return available Schur partition labels."""
         return list(self._partitions)
 
+    def _try_build_explicit_canonical_metadata(self) -> bool:
+        """Build explicit symmetry-adapted basis when a closed form is available."""
+        if self.space.m != 2 or self.space.n != 3:
+            return False
+
+        expected = [(3,), (2, 1)]
+        if list(self._partitions) != expected:
+            return False
+
+        cols = [
+            np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=complex),
+            np.array([0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0], dtype=complex) / np.sqrt(3.0),
+            np.array([0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0], dtype=complex) / np.sqrt(3.0),
+            np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0], dtype=complex),
+            np.array([0.0, 2.0, -1.0, 0.0, -1.0, 0.0, 0.0, 0.0], dtype=complex) / np.sqrt(6.0),
+            np.array([0.0, 0.0, 0.0, -1.0, 0.0, -1.0, 2.0, 0.0], dtype=complex) / np.sqrt(6.0),
+            np.array([0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0], dtype=complex) / np.sqrt(2.0),
+            np.array([0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0], dtype=complex) / np.sqrt(2.0),
+        ]
+        W = np.column_stack(cols)
+
+        unitary_err = la.norm(safe_matmul(W.conj().T, W) - np.eye(8, dtype=complex))
+        if unitary_err > 1e-10:
+            raise RuntimeError("Explicit canonical Schur basis for (m=2, n=3) is not unitary.")
+
+        self._W = W
+        self._block_slices = {
+            (3,): slice(0, 4),
+            (2, 1): slice(4, 8),
+        }
+        self._sector_bases = {
+            (3,): W[:, self._block_slices[(3,)]],
+            (2, 1): W[:, self._block_slices[(2, 1)]],
+        }
+        self._sector_projectors = {
+            lam: safe_matmul(basis, basis.conj().T) for lam, basis in self._sector_bases.items()
+        }
+        self._multiplicity_projectors = {
+            (3,): (self._sector_projectors[(3,)],),
+            (2, 1): (
+                safe_matmul(W[:, 4:6], W[:, 4:6].conj().T),
+                safe_matmul(W[:, 6:8], W[:, 6:8].conj().T),
+            ),
+        }
+        return True
+
     def _build_sector_metadata(self) -> None:
         if self._W is not None:
+            return
+
+        if self._try_build_explicit_canonical_metadata():
             return
 
         cols: List[np.ndarray] = []
